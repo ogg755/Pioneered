@@ -37,4 +37,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: mixxx-deb
-          path: /build/mixxx_*.deb
+          path: |
+            /build/mixxx_*.deb
+            /build/mixxx-data_*.deb
