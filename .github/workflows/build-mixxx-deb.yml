@@ -1,0 +1,40 @@
+name: Build patched Mixxx .deb (arm64)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    container: debian:trixie
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable source repos and install build tools
+        run: |
+          echo "deb-src http://deb.debian.org/debian trixie main" \
+            > /etc/apt/sources.list.d/src.list
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential devscripts dpkg-dev quilt ca-certificates
+          apt-get build-dep -y mixxx
+
+      - name: Fetch and patch source
+        run: |
+          mkdir /build && cd /build
+          apt-get source mixxx
+          cd mixxx-*/
+          patch -p1 < "$GITHUB_WORKSPACE/mixxx-patch/usb-browse.patch"
+          DEBEMAIL=nonofordnonoford@gmail.com DEBFULLNAME=marco \
+            dch --local +usbbrowse "Add [Library],goto_usb_a/goto_usb_b sidebar controls"
+
+      - name: Build package
+        run: |
+          cd /build/mixxx-*/
+          dpkg-buildpackage -b -uc -us
+
+      - name: Upload .deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: mixxx-deb
+          path: /build/mixxx_*.deb
