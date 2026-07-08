@@ -5,7 +5,7 @@ index e019008..9448b3d 100644
 @@ -90,6 +90,12 @@ class Library: public QObject {
          return m_editMetadataSelectedClick;
      }
-
+ 
 +    // Pioneered touch-browse: expose the sidebar model so LibraryControl can
 +    // re-root it at a Rekordbox USB device.
 +    SidebarModel* sidebarModel() const {
@@ -13,7 +13,7 @@ index e019008..9448b3d 100644
 +    }
 +
      //static Library* buildDefaultLibrary();
-
+ 
      static const int kDefaultRowHeightPx;
 diff --git a/src/library/librarycontrol.h b/src/library/librarycontrol.h
 index 65e2101..deecacd 100644
@@ -21,15 +21,15 @@ index 65e2101..deecacd 100644
 +++ b/src/library/librarycontrol.h
 @@ -1,6 +1,7 @@
  #pragma once
-
+ 
  #include <QObject>
 +#include <QPersistentModelIndex>
  #include <memory>
-
+ 
  #include "control/controlproxy.h"
 @@ -114,6 +115,17 @@ class LibraryControl : public QObject {
      void slotDecrementFontSize(double v);
-
+ 
    private:
 +    // Pioneered touch-browse: jump the sidebar to a Rekordbox USB device
 +    void slotGotoUsb(int usbIndex, double v);
@@ -43,10 +43,10 @@ index 65e2101..deecacd 100644
 +    int m_rootedUsb = 0; // 0 = full tree, 1 = USBA, 2 = USBB
 +
      Library* m_pLibrary;
-
+ 
      // Simulate pressing a key on the keyboard
 diff --git a/src/library/librarycontrol.cpp b/src/library/librarycontrol.cpp
-index f52cc25..5e4de97 100644
+index f52cc25..6fe7716 100644
 --- a/src/library/librarycontrol.cpp
 +++ b/src/library/librarycontrol.cpp
 @@ -11,6 +11,7 @@
@@ -57,31 +57,33 @@ index f52cc25..5e4de97 100644
  #include "mixer/playermanager.h"
  #include "moc_librarycontrol.cpp"
  #include "util/cmdlineargs.h"
-@@ -242,6 +243,20 @@ LibraryControl::LibraryControl(Library* pLibrary)
+@@ -242,6 +243,22 @@ LibraryControl::LibraryControl(Library* pLibrary)
                  &LibraryControl::slotGoToItem);
      }
-
+ 
 +    // Pioneered touch-browse controls: jump to Rekordbox USB device A/B.
 +    // Request 1 => root the sidebar at that device; request 0 while rooted
 +    // at it => restore the full tree. No-op when the device is not mounted.
 +    m_pGotoUsbA = std::make_unique<ControlPushButton>(
 +            ConfigKey("[Library]", "goto_usb_a"));
 +    m_pGotoUsbA->setStates(2);
++    m_pGotoUsbA->setButtonMode(ControlPushButton::TOGGLE);
 +    m_pGotoUsbA->connectValueChangeRequest(this,
 +            [this](double value) { slotGotoUsb(1, value); });
 +    m_pGotoUsbB = std::make_unique<ControlPushButton>(
 +            ConfigKey("[Library]", "goto_usb_b"));
 +    m_pGotoUsbB->setStates(2);
++    m_pGotoUsbB->setButtonMode(ControlPushButton::TOGGLE);
 +    m_pGotoUsbB->connectValueChangeRequest(this,
 +            [this](double value) { slotGotoUsb(2, value); });
 +
      // Auto DJ controls
      m_pAutoDjAddTop = std::make_unique<ControlPushButton>(ConfigKey("[Library]", "AutoDjAddTop"));
      m_pAutoDjAddTop->addAlias(ConfigKey(
-@@ -1070,6 +1085,93 @@ void LibraryControl::slotGoToItem(double v) {
+@@ -1070,6 +1087,105 @@ void LibraryControl::slotGoToItem(double v) {
      }
  }
-
+ 
 +void LibraryControl::slotGotoUsb(int usbIndex, double v) {
 +    if (!m_pSidebarWidget) {
 +        return;
@@ -133,11 +135,23 @@ index f52cc25..5e4de97 100644
 +    }
 +    for (int i = 0; i < pSidebarModel->rowCount(); ++i) {
 +        const QModelIndex featureIndex = pSidebarModel->index(i, 0);
++        // endsWith: while scanning for devices the feature title is
++        // temporarily "(loading) Rekordbox"
 +        const QString featureTitle =
 +                pSidebarModel->data(featureIndex, Qt::DisplayRole).toString();
-+        if (featureTitle.compare(QStringLiteral("Rekordbox"),
-+                    Qt::CaseInsensitive) != 0) {
++        if (!featureTitle.endsWith(QStringLiteral("Rekordbox"),
++                    Qt::CaseInsensitive)) {
 +            continue;
++        }
++        if (pSidebarModel->rowCount(featureIndex) == 0) {
++            // The Rekordbox device list is only populated by
++            // RekordboxFeature::activate() (no startup scan in 2.5.0).
++            // Trigger it via the model's clicked() handler. The scan runs
++            // on a worker thread (QtConcurrent), so the re-scan below will
++            // usually still find no children on this first attempt; in that
++            // case we return an invalid index and the next button press
++            // finds the populated list.
++            pSidebarModel->clicked(featureIndex);
 +        }
 +        for (int j = 0; j < pSidebarModel->rowCount(featureIndex); ++j) {
 +            const QModelIndex deviceIndex =
