@@ -16,29 +16,56 @@ index e019008..9448b3d 100644
  
      static const int kDefaultRowHeightPx;
 diff --git a/src/library/librarycontrol.h b/src/library/librarycontrol.h
-index 65e2101..deecacd 100644
+index 65e2101..f3f5fea 100644
 --- a/src/library/librarycontrol.h
 +++ b/src/library/librarycontrol.h
-@@ -1,6 +1,7 @@
+@@ -1,6 +1,9 @@
  #pragma once
  
++#include <QElapsedTimer>
  #include <QObject>
 +#include <QPersistentModelIndex>
++#include <QTimer>
  #include <memory>
  
  #include "control/controlproxy.h"
-@@ -114,6 +115,17 @@ class LibraryControl : public QObject {
+@@ -114,6 +117,42 @@ class LibraryControl : public QObject {
      void slotDecrementFontSize(double v);
  
    private:
-+    // Pioneered touch-browse: jump the sidebar to a Rekordbox USB device
++    // Pioneered touch-browse: USB A/B buttons.
++    // Short press (<600ms) toggles browse-rooting at the Rekordbox device;
++    // holding 5s ejects the stick (with accelerating red/white flash).
 +    void slotGotoUsb(int usbIndex, double v);
++    void slotUsbButtonPress(int usbIndex);
++    void slotUsbButtonRelease(int usbIndex);
++    void slotHoldFlashTick();
++    void finishHoldEject(int usbIndex);
++    void browseToggleUsb(int usbIndex);
++    void startEject(int usbIndex);
++    bool isUsbInUse(int usbIndex) const;
++    void showBanner(ControlPushButton* pBanner);
++    void clearBanners();
++    void updateUsbStateControls();
++    void refreshRekordboxDevices();
++    static QString usbMountPath(int usbIndex);
 +    QModelIndex findRekordboxDeviceIndex(const QString& deviceName);
 +    void restoreSidebarRoot();
 +    void validateSidebarRoot();
 +
 +    std::unique_ptr<ControlPushButton> m_pGotoUsbA;
 +    std::unique_ptr<ControlPushButton> m_pGotoUsbB;
++    std::unique_ptr<ControlPushButton> m_pUsbStateA;
++    std::unique_ptr<ControlPushButton> m_pUsbStateB;
++    std::unique_ptr<ControlPushButton> m_pUsbLocked;
++    std::unique_ptr<ControlPushButton> m_pUsbEjectFailed;
++    QTimer m_holdFlashTimer;
++    QTimer m_bannerClearTimer;
++    QElapsedTimer m_holdElapsed;
++    qint64 m_lastFlashToggleMs = 0;
++    int m_holdUsb = 0;  // 0 = no hold in progress, 1 = USBA, 2 = USBB
++    bool m_flashOn = false;
++    bool m_ejectRunning = false;
 +    QPersistentModelIndex m_rootedDeviceIndex;
 +    int m_rootedUsb = 0; // 0 = full tree, 1 = USBA, 2 = USBB
 +
@@ -46,53 +73,257 @@ index 65e2101..deecacd 100644
  
      // Simulate pressing a key on the keyboard
 diff --git a/src/library/librarycontrol.cpp b/src/library/librarycontrol.cpp
-index f52cc25..cab4cbc 100644
+index f52cc25..64d7ff9 100644
 --- a/src/library/librarycontrol.cpp
 +++ b/src/library/librarycontrol.cpp
-@@ -11,6 +11,7 @@
+@@ -3,6 +3,8 @@
+ #include <QApplication>
+ #include <QKeyEvent>
+ #include <QModelIndex>
++#include <QProcess>
++#include <QStorageInfo>
+ #include <QWindow>
+ #include <QtDebug>
+ 
+@@ -11,8 +13,11 @@
  #include "control/controlpushbutton.h"
  #include "library/library.h"
  #include "library/libraryview.h"
 +#include "library/sidebarmodel.h"
++#include "mixer/playerinfo.h"
  #include "mixer/playermanager.h"
  #include "moc_librarycontrol.cpp"
++#include "track/track.h"
  #include "util/cmdlineargs.h"
-@@ -242,6 +243,22 @@ LibraryControl::LibraryControl(Library* pLibrary)
+ #include "widget/wlibrary.h"
+ #include "widget/wlibrarysidebar.h"
+@@ -242,6 +247,48 @@ LibraryControl::LibraryControl(Library* pLibrary)
                  &LibraryControl::slotGoToItem);
      }
  
-+    // Pioneered touch-browse controls: jump to Rekordbox USB device A/B.
-+    // Request 1 => root the sidebar at that device; request 0 while rooted
-+    // at it => restore the full tree. No-op when the device is not mounted.
++    // Pioneered touch-browse: USB A/B buttons. The goto_usb_* controls are
++    // plain push buttons (1 on press, 0 on release); all gesture logic
++    // (short press = browse toggle, 5s hold = eject) lives here. The skin
++    // displays usb_*_state (0 idle / 1 red / 2 flash-white) and the two
++    // banner controls.
 +    m_pGotoUsbA = std::make_unique<ControlPushButton>(
 +            ConfigKey("[Library]", "goto_usb_a"));
-+    m_pGotoUsbA->setStates(2);
-+    m_pGotoUsbA->setButtonMode(ControlPushButton::TOGGLE);
 +    m_pGotoUsbA->connectValueChangeRequest(this,
-+            [this](double value) { slotGotoUsb(1, value); });
++            [this](double value) {
++                m_pGotoUsbA->setAndConfirm(value);
++                slotGotoUsb(1, value);
++            });
 +    m_pGotoUsbB = std::make_unique<ControlPushButton>(
 +            ConfigKey("[Library]", "goto_usb_b"));
-+    m_pGotoUsbB->setStates(2);
-+    m_pGotoUsbB->setButtonMode(ControlPushButton::TOGGLE);
 +    m_pGotoUsbB->connectValueChangeRequest(this,
-+            [this](double value) { slotGotoUsb(2, value); });
++            [this](double value) {
++                m_pGotoUsbB->setAndConfirm(value);
++                slotGotoUsb(2, value);
++            });
++    m_pUsbStateA = std::make_unique<ControlPushButton>(
++            ConfigKey("[Library]", "usb_a_state"));
++    m_pUsbStateA->setStates(3);
++    m_pUsbStateB = std::make_unique<ControlPushButton>(
++            ConfigKey("[Library]", "usb_b_state"));
++    m_pUsbStateB->setStates(3);
++    m_pUsbLocked = std::make_unique<ControlPushButton>(
++            ConfigKey("[Library]", "usb_locked"));
++    m_pUsbEjectFailed = std::make_unique<ControlPushButton>(
++            ConfigKey("[Library]", "usb_eject_failed"));
++
++    m_holdFlashTimer.setInterval(40);
++    connect(&m_holdFlashTimer,
++            &QTimer::timeout,
++            this,
++            &LibraryControl::slotHoldFlashTick);
++    m_bannerClearTimer.setSingleShot(true);
++    m_bannerClearTimer.setInterval(2000);
++    connect(&m_bannerClearTimer,
++            &QTimer::timeout,
++            this,
++            &LibraryControl::clearBanners);
 +
      // Auto DJ controls
      m_pAutoDjAddTop = std::make_unique<ControlPushButton>(ConfigKey("[Library]", "AutoDjAddTop"));
      m_pAutoDjAddTop->addAlias(ConfigKey(
-@@ -1070,6 +1087,111 @@ void LibraryControl::slotGoToItem(double v) {
+@@ -1070,6 +1117,269 @@ void LibraryControl::slotGoToItem(double v) {
      }
  }
  
 +void LibraryControl::slotGotoUsb(int usbIndex, double v) {
-+    if (!m_pSidebarWidget) {
++    if (v > 0) {
++        slotUsbButtonPress(usbIndex);
++    } else {
++        slotUsbButtonRelease(usbIndex);
++    }
++}
++
++void LibraryControl::slotUsbButtonPress(int usbIndex) {
++    if (m_holdUsb != 0 || m_ejectRunning) {
++        return; // one hold/eject at a time
++    }
++    m_holdUsb = usbIndex;
++    m_flashOn = false;
++    m_lastFlashToggleMs = 0;
++    m_holdElapsed.start();
++    m_holdFlashTimer.start();
++}
++
++void LibraryControl::slotUsbButtonRelease(int usbIndex) {
++    if (m_holdUsb != usbIndex) {
++        return; // eject already fired at 5s, or stray release
++    }
++    const qint64 elapsed = m_holdElapsed.elapsed();
++    m_holdFlashTimer.stop();
++    m_holdUsb = 0;
++    m_flashOn = false;
++    updateUsbStateControls();
++    if (elapsed < 600) {
++        browseToggleUsb(usbIndex);
++    }
++    // 600ms..5s: cancelled hold, no action
++}
++
++void LibraryControl::slotHoldFlashTick() {
++    if (m_holdUsb == 0) {
++        m_holdFlashTimer.stop();
 +        return;
 +    }
-+    if (v <= 0) {
-+        // Toggle-off request: only meaningful when rooted at this device
++    const qint64 elapsed = m_holdElapsed.elapsed();
++    if (elapsed >= 5000) {
++        m_holdFlashTimer.stop();
++        const int usbIndex = m_holdUsb;
++        m_holdUsb = 0;
++        m_flashOn = false;
++        updateUsbStateControls();
++        finishHoldEject(usbIndex);
++        return;
++    }
++    if (elapsed < 600) {
++        return;
++    }
++    // Flash toggle interval shrinks linearly 250ms -> 80ms over the hold
++    const qint64 interval = 250 - (250 - 80) * (elapsed - 600) / (5000 - 600);
++    if (m_lastFlashToggleMs == 0 || elapsed - m_lastFlashToggleMs >= interval) {
++        m_flashOn = !m_flashOn;
++        m_lastFlashToggleMs = elapsed;
++        updateUsbStateControls();
++    }
++}
++
++void LibraryControl::finishHoldEject(int usbIndex) {
++    if (isUsbInUse(usbIndex)) {
++        showBanner(m_pUsbLocked.get());
++        return;
++    }
++    startEject(usbIndex);
++}
++
++bool LibraryControl::isUsbInUse(int usbIndex) const {
++    const QString prefix = usbMountPath(usbIndex) + QStringLiteral("/");
++    const QStringList groups = {QStringLiteral("[Channel1]"),
++            QStringLiteral("[Channel2]")};
++    for (const QString& group : groups) {
++        const TrackPointer pTrack = PlayerInfo::instance().getTrackInfo(group);
++        if (pTrack && pTrack->getLocation().startsWith(prefix)) {
++            return true;
++        }
++    }
++    return false;
++}
++
++void LibraryControl::startEject(int usbIndex) {
++    const QString mountPath = usbMountPath(usbIndex);
++    const QStorageInfo storage(mountPath);
++    if (!storage.isValid() || !storage.isReady() ||
++            storage.rootPath() != mountPath) {
++        // Not mounted: treat as already ejected
 +        if (m_rootedUsb == usbIndex) {
 +            restoreSidebarRoot();
 +        }
++        return;
++    }
++#ifdef Q_OS_LINUX
++    if (m_rootedUsb == usbIndex) {
++        restoreSidebarRoot();
++    }
++    m_ejectRunning = true;
++    auto* pProcess = new QProcess(this);
++    connect(pProcess,
++            QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
++            this,
++            [this, usbIndex, pProcess](int exitCode, QProcess::ExitStatus) {
++                pProcess->deleteLater();
++                m_ejectRunning = false;
++                if (exitCode == 0) {
++                    // Device gone: refresh the Rekordbox device list so the
++                    // sidebar row (and its playlists/tracks) disappears
++                    refreshRekordboxDevices();
++                } else {
++                    showBanner(m_pUsbEjectFailed.get());
++                }
++                updateUsbStateControls();
++            });
++    pProcess->start(QStringLiteral("sudo"),
++            {QStringLiteral("umount"), mountPath});
++#else
++    Q_UNUSED(usbIndex);
++    // No umount on this platform; signal the failure visibly
++    showBanner(m_pUsbEjectFailed.get());
++#endif
++}
++
++void LibraryControl::refreshRekordboxDevices() {
++    SidebarModel* pSidebarModel = m_pLibrary->sidebarModel();
++    VERIFY_OR_DEBUG_ASSERT(pSidebarModel) {
++        return;
++    }
++    for (int i = 0; i < pSidebarModel->rowCount(); ++i) {
++        const QModelIndex featureIndex = pSidebarModel->index(i, 0);
++        const QString featureTitle =
++                pSidebarModel->data(featureIndex, Qt::DisplayRole).toString();
++        if (featureTitle.endsWith(QStringLiteral("Rekordbox"),
++                    Qt::CaseInsensitive)) {
++            pSidebarModel->clicked(featureIndex); // triggers device rescan
++            return;
++        }
++    }
++}
++
++void LibraryControl::showBanner(ControlPushButton* pBanner) {
++    clearBanners();
++    pBanner->setAndConfirm(1.0);
++    m_bannerClearTimer.start();
++}
++
++void LibraryControl::clearBanners() {
++    m_pUsbLocked->setAndConfirm(0.0);
++    m_pUsbEjectFailed->setAndConfirm(0.0);
++}
++
++void LibraryControl::updateUsbStateControls() {
++    auto stateFor = [this](int usbIndex) -> double {
++        if (m_holdUsb == usbIndex) {
++            return m_flashOn ? 2.0 : 1.0;
++        }
++        return (m_rootedUsb == usbIndex) ? 1.0 : 0.0;
++    };
++    m_pUsbStateA->setAndConfirm(stateFor(1));
++    m_pUsbStateB->setAndConfirm(stateFor(2));
++}
++
++// static
++QString LibraryControl::usbMountPath(int usbIndex) {
++    return (usbIndex == 1) ? QStringLiteral("/media/USBA")
++                           : QStringLiteral("/media/USBB");
++}
++
++void LibraryControl::browseToggleUsb(int usbIndex) {
++    if (!m_pSidebarWidget) {
++        return;
++    }
++    if (m_rootedUsb == usbIndex) {
++        restoreSidebarRoot();
 +        return;
 +    }
 +    const QString deviceName = (usbIndex == 1)
@@ -100,14 +331,12 @@ index f52cc25..cab4cbc 100644
 +            : QStringLiteral("USBB");
 +    const QModelIndex deviceIndex = findRekordboxDeviceIndex(deviceName);
 +    if (!deviceIndex.isValid()) {
-+        // Device not mounted (or Rekordbox feature empty): no-op
-+        return;
++        return; // not mounted / not scanned yet: no-op (retry primes scan)
 +    }
 +    m_pSidebarWidget->setRootIndex(deviceIndex);
 +    m_rootedDeviceIndex = QPersistentModelIndex(deviceIndex);
 +    m_rootedUsb = usbIndex;
 +    SidebarModel* pSidebarModel = m_pLibrary->sidebarModel();
-+    // Watch for the device disappearing (USB unplugged while rooted)
 +    connect(pSidebarModel,
 +            &QAbstractItemModel::rowsRemoved,
 +            this,
@@ -119,19 +348,15 @@ index f52cc25..cab4cbc 100644
 +            &LibraryControl::validateSidebarRoot,
 +            Qt::UniqueConnection);
 +    if (pSidebarModel->rowCount(deviceIndex) == 0) {
-+        // Device playlists are parsed lazily on first activation
-+        // (RekordboxFeature::activateChild -> parseDeviceDB, async).
-+        // Trigger it so the rooted view fills in as parsing completes.
++        // Playlists parse lazily on first activation (async)
 +        pSidebarModel->clicked(deviceIndex);
 +    }
-+    // Select the first playlist so the DDJ-400 browse knob works immediately
 +    const QModelIndex firstChild = pSidebarModel->index(0, 0, deviceIndex);
 +    if (firstChild.isValid()) {
 +        m_pSidebarWidget->selectIndex(firstChild);
 +    }
 +    setLibraryFocus(FocusWidget::Sidebar);
-+    m_pGotoUsbA->setAndConfirm(usbIndex == 1 ? 1.0 : 0.0);
-+    m_pGotoUsbB->setAndConfirm(usbIndex == 2 ? 1.0 : 0.0);
++    updateUsbStateControls();
 +}
 +
 +QModelIndex LibraryControl::findRekordboxDeviceIndex(const QString& deviceName) {
@@ -179,8 +404,7 @@ index f52cc25..cab4cbc 100644
 +    if (m_pSidebarWidget) {
 +        m_pSidebarWidget->setRootIndex(QModelIndex());
 +    }
-+    m_pGotoUsbA->setAndConfirm(0.0);
-+    m_pGotoUsbB->setAndConfirm(0.0);
++    updateUsbStateControls();
 +}
 +
 +void LibraryControl::validateSidebarRoot() {
