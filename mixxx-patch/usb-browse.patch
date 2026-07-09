@@ -73,7 +73,7 @@ index 65e2101..f3f5fea 100644
  
      // Simulate pressing a key on the keyboard
 diff --git a/src/library/librarycontrol.cpp b/src/library/librarycontrol.cpp
-index f52cc25..64d7ff9 100644
+index f52cc25..1b7ef65 100644
 --- a/src/library/librarycontrol.cpp
 +++ b/src/library/librarycontrol.cpp
 @@ -3,6 +3,8 @@
@@ -146,7 +146,7 @@ index f52cc25..64d7ff9 100644
      // Auto DJ controls
      m_pAutoDjAddTop = std::make_unique<ControlPushButton>(ConfigKey("[Library]", "AutoDjAddTop"));
      m_pAutoDjAddTop->addAlias(ConfigKey(
-@@ -1070,6 +1117,269 @@ void LibraryControl::slotGoToItem(double v) {
+@@ -1070,6 +1117,282 @@ void LibraryControl::slotGoToItem(double v) {
      }
  }
  
@@ -252,10 +252,10 @@ index f52cc25..64d7ff9 100644
 +    connect(pProcess,
 +            QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
 +            this,
-+            [this, usbIndex, pProcess](int exitCode, QProcess::ExitStatus) {
++            [this, usbIndex, pProcess](int exitCode, QProcess::ExitStatus exitStatus) {
 +                pProcess->deleteLater();
 +                m_ejectRunning = false;
-+                if (exitCode == 0) {
++                if (exitStatus == QProcess::NormalExit && exitCode == 0) {
 +                    // Device gone: refresh the Rekordbox device list so the
 +                    // sidebar row (and its playlists/tracks) disappears
 +                    refreshRekordboxDevices();
@@ -263,6 +263,19 @@ index f52cc25..64d7ff9 100644
 +                    showBanner(m_pUsbEjectFailed.get());
 +                }
 +                updateUsbStateControls();
++            });
++    connect(pProcess,
++            &QProcess::errorOccurred,
++            this,
++            [this, pProcess](QProcess::ProcessError error) {
++                // finished() never fires for a process that failed to start;
++                // without this handler m_ejectRunning would stay true forever
++                if (error == QProcess::FailedToStart) {
++                    pProcess->deleteLater();
++                    m_ejectRunning = false;
++                    showBanner(m_pUsbEjectFailed.get());
++                    updateUsbStateControls();
++                }
 +            });
 +    pProcess->start(QStringLiteral("sudo"),
 +            {QStringLiteral("umount"), mountPath});
