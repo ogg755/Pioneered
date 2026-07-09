@@ -11,8 +11,9 @@ The skin's USB A/USB B buttons need the patched Mixxx build
 
 1. Run the "Build patched Mixxx .deb (arm64)" GitHub Actions workflow.
 2. Download the `mixxx-deb` artifact.
-3. The artifact contains both `mixxx_*_arm64.deb` and `mixxx-data_*_all.deb`; both must be installed together:
-   sudo apt install -y /tmp/mixxx_*_arm64.deb /tmp/mixxx-data_*_all.deb
+3. The artifact contains `mixxx_*_arm64.deb`, `mixxx-data_*_all.deb`, and
+   `mixxx-dbgsym_*.deb` (debug symbols for crash backtraces); install together:
+   sudo apt install -y /tmp/mixxx_*_arm64.deb /tmp/mixxx-data_*_all.deb /tmp/mixxx-dbgsym_*.deb
    sudo apt-mark hold mixxx mixxx-data        # stop apt upgrade replacing them
 4. Verify: mixxx --version shows a "+usbbrowse" suffix.
 
@@ -25,3 +26,25 @@ reinstall, re-hold.
 - USB sticks must mount at /media/USBA and /media/USBB (udev scripts).
 - On an unpatched Mixxx the skin still works; USB buttons are inert.
 - On a fresh boot the first USB A/B press primes Mixxx's Rekordbox device scan (async) and shows the Rekordbox landing page; the second press jumps to the device's playlists.
+
+## Ejecting USB sticks (hold-to-eject)
+- Hold USB A/USB B ~5 s: the button flashes red/white, speeding up; at 5 s the
+  stick is unmounted and its playlists/tracks disappear. Safe to pull.
+- "USB LOCKED" (2 s banner): a deck still has a track from that stick loaded
+  (playing or paused). Load something else on that deck, then retry.
+- "EJECT FAILED" (2 s banner): unmount failed; the stick is still mounted.
+- Short press is unchanged (browse toggle). Releasing mid-hold cancels.
+- Eject runs `sudo umount /media/USBX` from Mixxx; the same passwordless
+  sudoers rule the old Tkinter overlay used must remain in place.
+- The old Tkinter overlay (usb-control.py) is retired: remove its line from
+  the Openbox autostart file (~/.config/openbox/autostart) after the eject
+  feature passes testing.
+
+## Crash diagnostics
+One-time setup:  sudo apt install -y systemd-coredump gdb
+(Debug symbols come from the mixxx-dbgsym package installed above.)
+After any Mixxx crash:
+  coredumpctl list mixxx
+  DEBUGINFOD_URLS="https://debuginfod.debian.net" coredumpctl gdb mixxx
+  (gdb) bt
+Copy the backtrace into the session for diagnosis.
