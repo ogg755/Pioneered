@@ -351,6 +351,22 @@ WLabel {
   color: white;
 }
 
+#UsbButtonA[value="2"], #UsbButtonB[value="2"] {
+  background-color: white;
+  border: 1px solid white;
+  color: #b6294c;
+}
+
+#UsbLockedBanner, #UsbEjectFailedBanner {
+  background-color: #b6294c;
+  border-radius: 4px;
+  color: white;
+  font-size: 16px;
+  font-weight: bold;
+  margin: 6px;
+  qproperty-alignment: AlignCenter;
+}
+
 #LoadDeck1, #LoadDeck2 {
   border-radius: 4px;
   color: white;

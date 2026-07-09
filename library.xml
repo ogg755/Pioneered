@@ -21,7 +21,7 @@
                   <PushButton>
                     <ObjectName>UsbButtonA</ObjectName>
                     <Size>0me,0me</Size>
-                    <NumberStates>2</NumberStates>
+                    <NumberStates>3</NumberStates>
                     <State>
                       <Number>0</Number>
                       <Text>USB A</Text>
@@ -30,15 +30,25 @@
                       <Number>1</Number>
                       <Text>USB A</Text>
                     </State>
+                    <State>
+                      <Number>2</Number>
+                      <Text>USB A</Text>
+                    </State>
                     <Connection>
                       <ConfigKey persist="false">[Library],goto_usb_a</ConfigKey>
+                      <ConnectValueToWidget>false</ConnectValueToWidget>
+                      <EmitOnPressAndRelease>true</EmitOnPressAndRelease>
                       <ButtonState>LeftButton</ButtonState>
+                    </Connection>
+                    <Connection>
+                      <ConfigKey persist="false">[Library],usb_a_state</ConfigKey>
+                      <ConnectValueFromWidget>false</ConnectValueFromWidget>
                     </Connection>
                   </PushButton>
                   <PushButton>
                     <ObjectName>UsbButtonB</ObjectName>
                     <Size>0me,0me</Size>
-                    <NumberStates>2</NumberStates>
+                    <NumberStates>3</NumberStates>
                     <State>
                       <Number>0</Number>
                       <Text>USB B</Text>
@@ -47,9 +57,19 @@
                       <Number>1</Number>
                       <Text>USB B</Text>
                     </State>
+                    <State>
+                      <Number>2</Number>
+                      <Text>USB B</Text>
+                    </State>
                     <Connection>
                       <ConfigKey persist="false">[Library],goto_usb_b</ConfigKey>
+                      <ConnectValueToWidget>false</ConnectValueToWidget>
+                      <EmitOnPressAndRelease>true</EmitOnPressAndRelease>
                       <ButtonState>LeftButton</ButtonState>
+                    </Connection>
+                    <Connection>
+                      <ConfigKey persist="false">[Library],usb_b_state</ConfigKey>
+                      <ConnectValueFromWidget>false</ConnectValueFromWidget>
                     </Connection>
                   </PushButton>
                 </Children>
@@ -80,6 +100,31 @@
           <Template src="skin:deck.xml">
             <SetVariable name="channel">1</SetVariable>
           </Template>
+          <WidgetGroup>
+            <ObjectName>UsbBanners</ObjectName>
+            <Layout>vertical</Layout>
+            <Size>150f,0me</Size>
+            <Children>
+              <Label>
+                <ObjectName>UsbLockedBanner</ObjectName>
+                <Text>USB LOCKED</Text>
+                <SizePolicy>me,me</SizePolicy>
+                <Connection>
+                  <ConfigKey persist="false">[Library],usb_locked</ConfigKey>
+                  <BindProperty>visible</BindProperty>
+                </Connection>
+              </Label>
+              <Label>
+                <ObjectName>UsbEjectFailedBanner</ObjectName>
+                <Text>EJECT FAILED</Text>
+                <SizePolicy>me,me</SizePolicy>
+                <Connection>
+                  <ConfigKey persist="false">[Library],usb_eject_failed</ConfigKey>
+                  <BindProperty>visible</BindProperty>
+                </Connection>
+              </Label>
+            </Children>
+          </WidgetGroup>
           <Template src="skin:deck.xml">
             <SetVariable name="channel">2</SetVariable>
           </Template>
