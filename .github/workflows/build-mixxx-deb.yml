@@ -25,7 +25,7 @@ jobs:
           apt-get source mixxx
           cd mixxx-*/
           patch -p1 < "$GITHUB_WORKSPACE/mixxx-patch/usb-browse.patch"
-          DEBEMAIL=nonofordnonoford@gmail.com DEBFULLNAME=marco \
+          DEBEMAIL=pioneered-build@localhost DEBFULLNAME="Pioneered CI" \
             dch --local "+usbbrowse.r${GITHUB_RUN_NUMBER}." "Pioneered USB browse/eject patch build ${GITHUB_RUN_NUMBER}"
 
       - name: Build package

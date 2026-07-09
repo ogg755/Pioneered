@@ -12,7 +12,9 @@ The skin's USB A/USB B buttons need the patched Mixxx build
 1. Run the "Build patched Mixxx .deb (arm64)" GitHub Actions workflow.
 2. Download the `mixxx-deb` artifact.
 3. The artifact contains `mixxx_*_arm64.deb`, `mixxx-data_*_all.deb`, and
-   `mixxx-dbgsym_*.deb` (debug symbols for crash backtraces); install together:
+   `mixxx-dbgsym_*.deb` (debug symbols for crash backtraces); install together.
+   On a re-deploy, unhold first — held packages can block even newer versions:
+   sudo apt-mark unhold mixxx mixxx-data 2>/dev/null || true
    sudo apt install -y /tmp/mixxx_*_arm64.deb /tmp/mixxx-data_*_all.deb /tmp/mixxx-dbgsym_*.deb
    sudo apt-mark hold mixxx mixxx-data        # stop apt upgrade replacing them
 4. Verify: mixxx --version shows a "+usbbrowse" suffix.
