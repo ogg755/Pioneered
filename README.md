@@ -14,6 +14,9 @@ Designed for use with the DDJ-400 with Raspberry Pi standalone mod ([link](https
 * Keylock and Quantize buttons
 * BeatFX section with main FX level meter and three effects units, each with individual FX level meters and on/off buttons.
 * Barely any resources = Small footprint!
+* Touch-optimized Browse tab: two-pane playlist/track view, one-tap USB A / USB B
+  source buttons (requires the small Mixxx patch in `mixxx-patch/`, see
+  `docs/pi-deploy.md`), and LOAD 1 / LOAD 2 buttons.
 
 ## Install
 Drop the `Pioneered` folder in `<MIXXX_FOLDER>/skins` and select it from `Preferences > Interface`.

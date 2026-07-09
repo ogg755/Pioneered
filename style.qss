@@ -256,7 +256,13 @@ WEffectSelector {
 
 #LibraryWrapper QScrollBar:vertical {
   border: 0;
-  width: 4px;
+  width: 24px;
+}
+
+#LibraryWrapper QScrollBar::handle:vertical {
+  background-color: #5f5f6a;
+  border-radius: 6px;
+  min-height: 48px;
 }
 
 #LibraryWrapper QScrollBar::add-page,
@@ -288,13 +294,16 @@ WEffectSelector {
 }
 
 #LibraryWrapper WLibrarySidebar {
-  background-color: #32323c;
-  selection-background-color: #e5e6ea;
-  border-left: 4px solid gray;
-  color: #e5e6ea;
+  background-color: #16161a;
+  selection-background-color: #112f5c;
+  color: #d5d6da;
+  font-size: 18px;
   font-weight: bold;
-  selection-color: black;
-  text-transform: uppercase;
+  selection-color: white;
+}
+
+#LibraryWrapper WLibrarySidebar::item {
+  padding: 12px 6px;
 }
 
 #LibraryWrapper QPushButton,
@@ -309,30 +318,6 @@ WLabel {
   color: #e5e6ea;
 }
 
-/* Library Search */
-#SearchBox {
-  background-color: #112f5c;
-  border-radius: 0;
-  font-size: 20px;
-  font-weight: bold;
-  padding: 4px;
-  text-transform: uppercase;
-}
-
-/* Sidebar (hide/show) */
-#SidebarContainer {
-  background-color: #112f5c;
-}
-#SidebarButton {
-  background-color: rgba(0,0,0,0.2);
-  border: 2px solid lightgray;
-  border-radius: 4px;
-  color: lightgray;
-  font-size: 16px;
-  font-weight: bold;
-  margin: 4px;
-}
-
 /* Checkbox in library "Played" column */
 #LibraryWrapper WTrackTableView::indicator:unchecked {
   image: url(skin:icons/library_checkbox.svg);
@@ -342,6 +327,62 @@ WLabel {
 }
 #LibraryWrapper WTrackTableView::indicator:checked {
   image: url(skin:icons/library_checkbox_checked.svg);
+}
+
+/* Touch browse pane */
+#PlaylistPane {
+  background-color: #16161a;
+  border-right: 2px solid #32323c;
+}
+
+#UsbButtonA, #UsbButtonB {
+  background-color: #1a1a20;
+  border: 1px solid #444444;
+  border-radius: 3px;
+  color: #aaaaaa;
+  font-size: 18px;
+  font-weight: bold;
+  margin: 4px;
+}
+
+#UsbButtonA[value="1"], #UsbButtonB[value="1"] {
+  background-color: #b6294c;
+  border: 1px solid #b6294c;
+  color: white;
+}
+
+#UsbButtonA[value="2"], #UsbButtonB[value="2"] {
+  background-color: white;
+  border: 1px solid white;
+  color: #b6294c;
+}
+
+#UsbLockedBanner, #UsbEjectFailedBanner {
+  background-color: #b6294c;
+  border-radius: 4px;
+  color: white;
+  font-size: 16px;
+  font-weight: bold;
+  margin: 6px;
+  qproperty-alignment: AlignCenter;
+}
+
+#LoadDeck1, #LoadDeck2 {
+  border-radius: 4px;
+  color: white;
+  font-size: 16px;
+  font-weight: bold;
+  margin: 6px;
+}
+
+#LoadDeck1 {
+  background-color: #112f5c;
+  border: 2px solid #2d85cd;
+}
+
+#LoadDeck2 {
+  background-color: #5c1120;
+  border: 2px solid #d73535;
 }
 
 /************************************************************************/

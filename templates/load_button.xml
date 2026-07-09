@@ -1,0 +1,16 @@
+<Template>
+  <PushButton>
+    <ObjectName>LoadDeck<Variable name="channel"/></ObjectName>
+    <Size>110f,0me</Size>
+    <NumberStates>1</NumberStates>
+    <State>
+      <Number>0</Number>
+      <Text>LOAD <Variable name="channel"/></Text>
+    </State>
+    <Connection>
+      <ConfigKey>[Channel<Variable name="channel"/>],LoadSelectedTrack</ConfigKey>
+      <EmitOnPressAndRelease>true</EmitOnPressAndRelease>
+      <ButtonState>LeftButton</ButtonState>
+    </Connection>
+  </PushButton>
+</Template>
