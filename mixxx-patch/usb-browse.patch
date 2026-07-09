@@ -46,7 +46,7 @@ index 65e2101..deecacd 100644
  
      // Simulate pressing a key on the keyboard
 diff --git a/src/library/librarycontrol.cpp b/src/library/librarycontrol.cpp
-index f52cc25..6fe7716 100644
+index f52cc25..cab4cbc 100644
 --- a/src/library/librarycontrol.cpp
 +++ b/src/library/librarycontrol.cpp
 @@ -11,6 +11,7 @@
@@ -80,7 +80,7 @@ index f52cc25..6fe7716 100644
      // Auto DJ controls
      m_pAutoDjAddTop = std::make_unique<ControlPushButton>(ConfigKey("[Library]", "AutoDjAddTop"));
      m_pAutoDjAddTop->addAlias(ConfigKey(
-@@ -1070,6 +1087,105 @@ void LibraryControl::slotGoToItem(double v) {
+@@ -1070,6 +1087,111 @@ void LibraryControl::slotGoToItem(double v) {
      }
  }
  
@@ -118,6 +118,12 @@ index f52cc25..6fe7716 100644
 +            this,
 +            &LibraryControl::validateSidebarRoot,
 +            Qt::UniqueConnection);
++    if (pSidebarModel->rowCount(deviceIndex) == 0) {
++        // Device playlists are parsed lazily on first activation
++        // (RekordboxFeature::activateChild -> parseDeviceDB, async).
++        // Trigger it so the rooted view fills in as parsing completes.
++        pSidebarModel->clicked(deviceIndex);
++    }
 +    // Select the first playlist so the DDJ-400 browse knob works immediately
 +    const QModelIndex firstChild = pSidebarModel->index(0, 0, deviceIndex);
 +    if (firstChild.isValid()) {
