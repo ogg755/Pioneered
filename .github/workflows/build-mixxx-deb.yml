@@ -40,3 +40,5 @@ jobs:
           path: |
             /build/mixxx_*.deb
             /build/mixxx-data_*.deb
+            /build/mixxx-dbgsym_*.deb
+            /build/mixxx-dbgsym_*.ddeb
