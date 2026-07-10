@@ -1,0 +1,11 @@
+[Unit]
+Description=USB mount for %i
+Requires=dev-%i.device
+After=dev-%i.device
+BindsTo=dev-%i.device
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/usb-mount.sh %i
+ExecStop=/usr/local/bin/usb-umount.sh %i

@@ -24,6 +24,17 @@ sudo apt-mark unhold mixxx mixxx-data, update `mixxx-patch/VERSION.md` facts,
 re-check the patch applies to the new apt source, re-run the workflow,
 reinstall, re-hold.
 
+## USB auto-mount layer (pi/ directory)
+The udev/systemd mount machinery lives on the Pi and is versioned in `pi/`:
+- `pi/99-usb-automount.rules` -> `/etc/udev/rules.d/99-usb-automount.rules`
+- `pi/usb-mount@.service`     -> `/etc/systemd/system/usb-mount@.service`
+- `pi/usb-mount.sh`           -> `/usr/local/bin/usb-mount.sh` (chmod +x)
+- `pi/usb-umount.sh`          -> `/usr/local/bin/usb-umount.sh` (chmod +x)
+After changing the rules/unit: `sudo udevadm control --reload` and
+`sudo systemctl daemon-reload`. The mount script serializes slot selection
+with flock; without it, two sticks inserted simultaneously both grabbed
+/media/USBA (the second mount stacking over the first) and USBB stayed empty.
+
 ## Behavior contract
 - USB sticks must mount at /media/USBA and /media/USBB (udev scripts).
 - On an unpatched Mixxx the skin still works; USB buttons are inert.
