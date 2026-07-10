@@ -30,13 +30,18 @@ Plus crash-evidence capture so any future segfault is diagnosable.
   that mount): flash stops, red **"USB LOCKED"** banner centered in the deck
   strip for 2 s, no eject. (Rule amended 2026-07-09 after field use: originally
   "block if loaded on any deck", but decks cannot be unloaded from the touch UI,
-  which made the last stick un-ejectable. Paused decks no longer block; a paused
-  track from an ejected stick cannot resume until reloaded.)
+  which made the last stick un-ejectable. Paused decks no longer block.)
+- **At 5 s, paused decks hold tracks from the stick**: those decks are
+  auto-unloaded via the deck `eject` control before the unmount runs. A paused
+  deck keeps its audio file open (caching reader), which otherwise fails the
+  unmount with EBUSY (found in field testing 2026-07-10, `fuser -vm` showed
+  Mixxx holding the paused decks' mp3s). The unmount is retried a few times
+  (5 × 400 ms) because the reader closes files asynchronously after unload.
 - **At 5 s, stick free**: eject — unmount; on success the stick's device row
   disappears from the sidebar (playlists/tracks no longer visible), button dims
   to idle; safe to remove.
-- **Unmount failure** (EBUSY etc.): red **"EJECT FAILED"** banner for 2 s; stick
-  stays mounted and browsable.
+- **Unmount failure** (EBUSY etc. after all retries): red **"EJECT FAILED"**
+  banner for 2 s; stick stays mounted and browsable; umount stderr is logged.
 - Only one button may be in a hold sequence at a time (second press ignored
   during a hold/eject).
 - Re-inserted sticks auto-remount via the existing udev/systemd rule

@@ -27,7 +27,7 @@ diff --git a/src/library/librarycontrol.h b/src/library/librarycontrol.h
  #include <memory>
  
  #include "control/controlproxy.h"
-@@ -114,6 +117,42 @@
+@@ -114,6 +117,45 @@
      void slotDecrementFontSize(double v);
  
    private:
@@ -41,6 +41,8 @@ diff --git a/src/library/librarycontrol.h b/src/library/librarycontrol.h
 +    void finishHoldEject(int usbIndex);
 +    void browseToggleUsb(int usbIndex);
 +    void startEject(int usbIndex);
++    void unloadDecksFromUsb(int usbIndex);
++    void tryUmount(int usbIndex, const QString& mountPath);
 +    bool isUsbInUse(int usbIndex) const;
 +    void showBanner(ControlPushButton* pBanner);
 +    void clearBanners();
@@ -64,6 +66,7 @@ diff --git a/src/library/librarycontrol.h b/src/library/librarycontrol.h
 +    int m_holdUsb = 0;  // 0 = no hold in progress, 1 = USBA, 2 = USBB
 +    bool m_flashOn = false;
 +    bool m_ejectRunning = false;
++    int m_ejectAttemptsLeft = 0;
 +    QPersistentModelIndex m_rootedDeviceIndex;
 +    int m_rootedUsb = 0; // 0 = full tree, 1 = USBA, 2 = USBB
 +
@@ -143,7 +146,7 @@ diff --git a/src/library/librarycontrol.cpp b/src/library/librarycontrol.cpp
  
      // Auto DJ controls
      m_pAutoDjAddTop = std::make_unique<ControlPushButton>(ConfigKey("[Library]", "AutoDjAddTop"));
-@@ -1070,6 +1117,288 @@
+@@ -1070,6 +1117,330 @@
      }
  }
  
@@ -250,21 +253,68 @@ diff --git a/src/library/librarycontrol.cpp b/src/library/librarycontrol.cpp
 +    if (m_rootedUsb == usbIndex) {
 +        restoreSidebarRoot();
 +    }
++    // Paused decks keep their audio files open (caching reader), which makes
++    // umount fail with EBUSY even though isUsbInUse() allowed the eject.
++    // Nothing is playing from this stick at this point, so unload those
++    // decks; the reader closes the files asynchronously, which is why
++    // tryUmount() retries instead of giving up on the first EBUSY.
++    unloadDecksFromUsb(usbIndex);
 +    m_ejectRunning = true;
++    m_ejectAttemptsLeft = 5;
++    tryUmount(usbIndex, mountPath);
++#else
++    Q_UNUSED(usbIndex);
++    // No umount on this platform; signal the failure visibly
++    showBanner(m_pUsbEjectFailed.get());
++#endif
++}
++
++void LibraryControl::unloadDecksFromUsb(int usbIndex) {
++    const QString prefix = usbMountPath(usbIndex) + QStringLiteral("/");
++    const QStringList groups = {QStringLiteral("[Channel1]"),
++            QStringLiteral("[Channel2]")};
++    for (const QString& group : groups) {
++        const TrackPointer pTrack = PlayerInfo::instance().getTrackInfo(group);
++        if (pTrack && pTrack->getLocation().startsWith(prefix) &&
++                ControlObject::get(ConfigKey(group, QStringLiteral("play"))) == 0.0) {
++            // Trigger the deck's eject control to unload the track; the
++            // touch UI exposes no other way to unload a deck.
++            ControlObject::set(ConfigKey(group, QStringLiteral("eject")), 1.0);
++            ControlObject::set(ConfigKey(group, QStringLiteral("eject")), 0.0);
++        }
++    }
++}
++
++void LibraryControl::tryUmount(int usbIndex, const QString& mountPath) {
 +    auto* pProcess = new QProcess(this);
 +    connect(pProcess,
 +            QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
 +            this,
-+            [this, usbIndex, pProcess](int exitCode, QProcess::ExitStatus exitStatus) {
++            [this, usbIndex, mountPath, pProcess](int exitCode, QProcess::ExitStatus exitStatus) {
 +                pProcess->deleteLater();
-+                m_ejectRunning = false;
 +                if (exitStatus == QProcess::NormalExit && exitCode == 0) {
++                    m_ejectRunning = false;
 +                    // Device gone: refresh the Rekordbox device list so the
 +                    // sidebar row (and its playlists/tracks) disappears
 +                    refreshRekordboxDevices();
-+                } else {
-+                    showBanner(m_pUsbEjectFailed.get());
++                    updateUsbStateControls();
++                    return;
 +                }
++                const QString errorOutput = QString::fromUtf8(
++                        pProcess->readAllStandardError())
++                                                    .trimmed();
++                qWarning() << "umount" << mountPath << "attempt failed:"
++                           << errorOutput;
++                if (--m_ejectAttemptsLeft > 0) {
++                    // Typically EBUSY until the caching reader has closed the
++                    // files of just-unloaded decks; retry briefly
++                    QTimer::singleShot(400, this, [this, usbIndex, mountPath] {
++                        tryUmount(usbIndex, mountPath);
++                    });
++                    return;
++                }
++                m_ejectRunning = false;
++                showBanner(m_pUsbEjectFailed.get());
 +                updateUsbStateControls();
 +            });
 +    connect(pProcess,
@@ -282,11 +332,6 @@ diff --git a/src/library/librarycontrol.cpp b/src/library/librarycontrol.cpp
 +            });
 +    pProcess->start(QStringLiteral("sudo"),
 +            {QStringLiteral("umount"), mountPath});
-+#else
-+    Q_UNUSED(usbIndex);
-+    // No umount on this platform; signal the failure visibly
-+    showBanner(m_pUsbEjectFailed.get());
-+#endif
 +}
 +
 +void LibraryControl::refreshRekordboxDevices() {
