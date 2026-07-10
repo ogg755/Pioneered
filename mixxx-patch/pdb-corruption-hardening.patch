@@ -1,0 +1,57 @@
+Description: Harden Rekordbox PDB parsing against corrupt/truncated EXPORT.PDB
+ A database truncated by unplugging the USB device mid-write (cluster chain
+ longer than file size) can contain page chains that cycle or run into pages
+ of other tables. parseDeviceDB() switched on the *table* type while kaitai
+ parses row bodies by the *page* type, so a wandering chain made the
+ static_casts read the wrong row type -> garbage pointers -> SIGSEGV in
+ LibraryControl::browseToggleUsb -> parseDeviceDB (observed on the XDJ400 Pi,
+ systemd-coredump at 22:15:11). Fix per crate-digger guidance: only
+ interpret rows when page type matches the table, null-guard row bodies, and
+ terminate page-chain cycles. Verified against a corpus of 311 corrupt PDBs:
+ fixes 3 reproducible segfaults and 1 infinite loop; valid files parse
+ identically. (Upstream 2.5.6 parser crashes on the same corpus.)
+Author: Pioneered CI <pioneered-build@localhost>
+Forwarded: no
+
+--- a/src/library/rekordbox/rekordboxfeature.cpp
++++ b/src/library/rekordbox/rekordboxfeature.cpp
+@@ -6,6 +6,7 @@
+ 
+ #include <QMap>
+ #include <QMessageBox>
++#include <QSet>
+ #include <QSettings>
+ #include <QString>
+ #include <QTextCodec>
+@@ -529,13 +530,29 @@
+                 uint16_t lastIndex = table->last_page()->index();
+                 rekordbox_pdb_t::page_ref_t* currentRef = table->first_page();
+ 
++                // A corrupt database (e.g. EXPORT.PDB truncated by unplugging
++                // the device mid-write) can produce next_page chains that
++                // cycle or wander into pages belonging to other tables. Track
++                // visited pages to terminate cycles, and only interpret rows
++                // when the page's own type matches the table being read:
++                // kaitai parses row bodies by page type, so a mismatched page
++                // would make the static_casts below read the wrong row type.
++                QSet<uint32_t> visitedPageIndices;
++
+                 while (true) {
++                    if (visitedPageIndices.contains(currentRef->index())) {
++                        qWarning() << "Rekordbox: page chain cycle at page"
++                                   << currentRef->index() << "- aborting table scan";
++                        break;
++                    }
++                    visitedPageIndices.insert(currentRef->index());
+                     rekordbox_pdb_t::page_t* page = currentRef->body();
+ 
+-                    if (page->is_data_page()) {
++                    if (page->type() == tableOrder[tableOrderIndex] &&
++                            page->is_data_page()) {
+                         for (const auto& rowgroup : *page->row_groups()) {
+                             for (const auto& rowRef : *rowgroup->rows()) {
+-                                if (rowRef->present()) {
++                                if (rowRef->present() && rowRef->body()) {
+                                     switch (tableOrder[tableOrderIndex]) {
+                                     case rekordbox_pdb_t::PAGE_TYPE_KEYS: {
+                                         auto* key =
