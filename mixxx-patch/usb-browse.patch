@@ -1,8 +1,7 @@
 diff --git a/src/library/library.h b/src/library/library.h
-index e019008..9448b3d 100644
 --- a/src/library/library.h
 +++ b/src/library/library.h
-@@ -90,6 +90,12 @@ class Library: public QObject {
+@@ -90,6 +90,12 @@
          return m_editMetadataSelectedClick;
      }
  
@@ -16,7 +15,6 @@ index e019008..9448b3d 100644
  
      static const int kDefaultRowHeightPx;
 diff --git a/src/library/librarycontrol.h b/src/library/librarycontrol.h
-index 65e2101..f3f5fea 100644
 --- a/src/library/librarycontrol.h
 +++ b/src/library/librarycontrol.h
 @@ -1,6 +1,9 @@
@@ -29,7 +27,7 @@ index 65e2101..f3f5fea 100644
  #include <memory>
  
  #include "control/controlproxy.h"
-@@ -114,6 +117,42 @@ class LibraryControl : public QObject {
+@@ -114,6 +117,42 @@
      void slotDecrementFontSize(double v);
  
    private:
@@ -73,7 +71,6 @@ index 65e2101..f3f5fea 100644
  
      // Simulate pressing a key on the keyboard
 diff --git a/src/library/librarycontrol.cpp b/src/library/librarycontrol.cpp
-index f52cc25..1b7ef65 100644
 --- a/src/library/librarycontrol.cpp
 +++ b/src/library/librarycontrol.cpp
 @@ -3,6 +3,8 @@
@@ -97,10 +94,11 @@ index f52cc25..1b7ef65 100644
  #include "util/cmdlineargs.h"
  #include "widget/wlibrary.h"
  #include "widget/wlibrarysidebar.h"
-@@ -242,6 +247,48 @@ LibraryControl::LibraryControl(Library* pLibrary)
+@@ -241,6 +246,48 @@
+                 this,
                  &LibraryControl::slotGoToItem);
      }
- 
++
 +    // Pioneered touch-browse: USB A/B buttons. The goto_usb_* controls are
 +    // plain push buttons (1 on press, 0 on release); all gesture logic
 +    // (short press = browse toggle, 5s hold = eject) lives here. The skin
@@ -142,11 +140,10 @@ index f52cc25..1b7ef65 100644
 +            &QTimer::timeout,
 +            this,
 +            &LibraryControl::clearBanners);
-+
+ 
      // Auto DJ controls
      m_pAutoDjAddTop = std::make_unique<ControlPushButton>(ConfigKey("[Library]", "AutoDjAddTop"));
-     m_pAutoDjAddTop->addAlias(ConfigKey(
-@@ -1070,6 +1117,282 @@ void LibraryControl::slotGoToItem(double v) {
+@@ -1070,6 +1117,288 @@
      }
  }
  
@@ -220,12 +217,18 @@ index f52cc25..1b7ef65 100644
 +}
 +
 +bool LibraryControl::isUsbInUse(int usbIndex) const {
++    // A deck blocks the eject only while it is actively playing a track from
++    // this stick. Paused decks with a loaded track do not hold it (mirroring
++    // the guard that blocks loading onto a playing deck): tracks cannot be
++    // unloaded from a deck, so requiring unloaded decks would make the last
++    // stick impossible to eject.
 +    const QString prefix = usbMountPath(usbIndex) + QStringLiteral("/");
 +    const QStringList groups = {QStringLiteral("[Channel1]"),
 +            QStringLiteral("[Channel2]")};
 +    for (const QString& group : groups) {
 +        const TrackPointer pTrack = PlayerInfo::instance().getTrackInfo(group);
-+        if (pTrack && pTrack->getLocation().startsWith(prefix)) {
++        if (pTrack && pTrack->getLocation().startsWith(prefix) &&
++                ControlObject::get(ConfigKey(group, QStringLiteral("play"))) > 0.0) {
 +            return true;
 +        }
 +    }

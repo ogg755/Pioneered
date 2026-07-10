@@ -26,9 +26,12 @@ Plus crash-evidence capture so any future segfault is diagnosable.
   smoothly to ≈6 Hz approaching 5 s.
 - **Release between 0.6 s and 5 s**: cancel — no browse action, flash stops,
   button returns to its normal look.
-- **At 5 s, stick in use** (either deck has a track whose path is under that
-  mount, playing or paused): flash stops, red **"USB LOCKED"** banner centered in
-  the deck strip for 2 s, no eject. (Chosen rule: block if loaded on any deck.)
+- **At 5 s, stick in use** (either deck is PLAYING a track whose path is under
+  that mount): flash stops, red **"USB LOCKED"** banner centered in the deck
+  strip for 2 s, no eject. (Rule amended 2026-07-09 after field use: originally
+  "block if loaded on any deck", but decks cannot be unloaded from the touch UI,
+  which made the last stick un-ejectable. Paused decks no longer block; a paused
+  track from an ejected stick cannot resume until reloaded.)
 - **At 5 s, stick free**: eject — unmount; on success the stick's device row
   disappears from the sidebar (playlists/tracks no longer visible), button dims
   to idle; safe to remove.
