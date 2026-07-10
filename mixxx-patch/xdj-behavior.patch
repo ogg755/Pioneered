@@ -1,0 +1,88 @@
+Description: XDJ-style behavior tweaks (waveform EQ decoupling, loop from cue)
+ 1. The RGB waveform shows the track's frequency content like on Pioneer
+    hardware: the EQ knobs and kill switches no longer scale the waveform
+    bands, so a closed EQ still shows whether the track has bass/mid/high
+    at that point. The per-band visual gains from the waveform preferences
+    still apply.
+ 2. Pressing loop-out with no loop-in set creates a loop starting at the
+    main cue point (Pioneer behavior), instead of being ignored.
+Author: Pioneered CI <pioneered-build@localhost>
+Forwarded: no
+
+diff --git a/src/waveform/renderers/waveformrenderersignalbase.cpp b/src/waveform/renderers/waveformrenderersignalbase.cpp
+--- a/src/waveform/renderers/waveformrenderersignalbase.cpp
++++ b/src/waveform/renderers/waveformrenderersignalbase.cpp
+@@ -182,38 +182,17 @@
+     }
+ 
+     if (pLowGain || pMidGain || pHighGain) {
+-        // Per-band gain from the EQ knobs.
+-        CSAMPLE_GAIN lowGain = 1.0, midGain = 1.0, highGain = 1.0;
+-
+-        // Only adjust low/mid/high gains if EQs are enabled.
+-        if (m_pEQEnabled->get() > 0.0) {
+-            if (m_pLowFilterControlObject &&
+-                m_pMidFilterControlObject &&
+-                m_pHighFilterControlObject) {
+-                lowGain = static_cast<CSAMPLE_GAIN>(m_pLowFilterControlObject->get());
+-                midGain = static_cast<CSAMPLE_GAIN>(m_pMidFilterControlObject->get());
+-                highGain = static_cast<CSAMPLE_GAIN>(m_pHighFilterControlObject->get());
+-            }
+-
+-            lowGain *= static_cast<CSAMPLE_GAIN>(
+-                    factory->getVisualGain(WaveformWidgetFactory::Low));
+-            midGain *= static_cast<CSAMPLE_GAIN>(
+-                    factory->getVisualGain(WaveformWidgetFactory::Mid));
+-            highGain *= static_cast<CSAMPLE_GAIN>(
+-                    factory->getVisualGain(WaveformWidgetFactory::High));
+-
+-            if (m_pLowKillControlObject && m_pLowKillControlObject->get() > 0.0) {
+-                lowGain = 0;
+-            }
+-
+-            if (m_pMidKillControlObject && m_pMidKillControlObject->get() > 0.0) {
+-                midGain = 0;
+-            }
+-
+-            if (m_pHighKillControlObject && m_pHighKillControlObject->get() > 0.0) {
+-                highGain = 0;
+-            }
+-        }
++        // Pioneered: like on Pioneer hardware, the waveform shows the track's
++        // content, not the mix output -- the EQ knobs and kill switches must
++        // not scale the bands, otherwise a closed EQ hides whether the track
++        // has e.g. bass at that point. Only the per-band visual gains from
++        // the waveform preferences apply.
++        CSAMPLE_GAIN lowGain = static_cast<CSAMPLE_GAIN>(
++                factory->getVisualGain(WaveformWidgetFactory::Low));
++        CSAMPLE_GAIN midGain = static_cast<CSAMPLE_GAIN>(
++                factory->getVisualGain(WaveformWidgetFactory::Mid));
++        CSAMPLE_GAIN highGain = static_cast<CSAMPLE_GAIN>(
++                factory->getVisualGain(WaveformWidgetFactory::High));
+ 
+         if (pLowGain != nullptr) {
+             *pLowGain = lowGain;
+diff --git a/src/engine/controls/loopingcontrol.cpp b/src/engine/controls/loopingcontrol.cpp
+--- a/src/engine/controls/loopingcontrol.cpp
++++ b/src/engine/controls/loopingcontrol.cpp
+@@ -919,6 +919,20 @@
+         }
+     }
+ 
++    // Pioneered: like on Pioneer gear, pressing loop-out without a loop-in
++    // creates a loop that starts at the main cue point.
++    if (!loopInfo.startPosition.isValid()) {
++        const auto cuePosition =
++                mixxx::audio::FramePos::fromEngineSamplePosMaybeInvalid(
++                        ControlObject::get(ConfigKey(
++                                getGroup(), QStringLiteral("cue_point"))));
++        if (cuePosition.isValid() && position > cuePosition) {
++            loopInfo.startPosition = cuePosition;
++            m_pCOLoopStartPosition->set(
++                    loopInfo.startPosition.toEngineSamplePosMaybeInvalid());
++        }
++    }
++
+     // If the user is trying to set a loop-out before the loop in or without
+     // having a loop-in, then ignore it.
+     if (!loopInfo.startPosition.isValid() || position <= loopInfo.startPosition) {
