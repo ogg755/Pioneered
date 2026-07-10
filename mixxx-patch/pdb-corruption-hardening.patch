@@ -5,11 +5,20 @@ Description: Harden Rekordbox PDB parsing against corrupt/truncated EXPORT.PDB
  parses row bodies by the *page* type, so a wandering chain made the
  static_casts read the wrong row type -> garbage pointers -> SIGSEGV in
  LibraryControl::browseToggleUsb -> parseDeviceDB (observed on the XDJ400 Pi,
- systemd-coredump at 22:15:11). Fix per crate-digger guidance: only
+ systemd-coredump 2026-07-09 22:15:11). Fix per crate-digger guidance: only
  interpret rows when page type matches the table, null-guard row bodies, and
  terminate page-chain cycles. Verified against a corpus of 311 corrupt PDBs:
  fixes 3 reproducible segfaults and 1 infinite loop; valid files parse
  identically. (Upstream 2.5.6 parser crashes on the same corpus.)
+ .
+ Also fixes a use-after-free race on device activation (field SIGSEGV on the
+ XDJ400 Pi, coredump PID 1249): activateChild() launched parseDeviceDB on a
+ worker thread with a raw TreeItem* and then immediately called
+ item->setData() on the main thread, while the worker's first statement reads
+ item->getData() -- a concurrent QVariant write/read. setData() now happens
+ before the worker launches (pool dispatch = happens-before), and a second
+ parse can no longer be launched while one runs (which also used to orphan
+ the first parse's result by replacing m_tracksFuture).
 Author: Pioneered CI <pioneered-build@localhost>
 Forwarded: no
 
@@ -55,3 +64,33 @@ Forwarded: no
                                      switch (tableOrder[tableOrderIndex]) {
                                      case rekordbox_pdb_t::PAGE_TYPE_KEYS: {
                                          auto* key =
+@@ -1507,14 +1524,24 @@
+     if (doParseDeviceDB) {
+         qDebug() << "Parse Rekordbox Device DB: " << playlist;
+ 
++        if (m_tracksFuture.isRunning()) {
++            // A previous parse is still running; starting another would race
++            // it on the shared TreeItem (and orphan its result by replacing
++            // m_tracksFuture). Ignore the activation; retry when done.
++            qWarning() << "Rekordbox device parse already running, ignoring activation";
++            return;
++        }
++
++        // This device is now a playlist element, future activations should
++        // treat it as such. This must happen BEFORE the worker is launched:
++        // parseDeviceDB reads item->getData() on the worker thread, and
++        // QVariant is not safe against a concurrent setData() here.
++        data[1] = QVariant(IS_NOT_RECORDBOX_DEVICE);
++        item->setData(QVariant(data));
++
+         // Let a worker thread do the XML parsing
+         m_tracksFuture = QtConcurrent::run(parseDeviceDB, static_cast<Library*>(parent())->dbConnectionPool(), item);
+         m_tracksFutureWatcher.setFuture(m_tracksFuture);
+-
+-        // This device is now a playlist element, future activations should treat is
+-        // as such
+-        data[1] = QVariant(IS_NOT_RECORDBOX_DEVICE);
+-        item->setData(QVariant(data));
+     } else {
+         qDebug() << "Activate Rekordbox Playlist: " << playlist;
+         m_pRekordboxPlaylistModel->setPlaylist(playlist);
