@@ -146,7 +146,7 @@ diff --git a/src/library/librarycontrol.cpp b/src/library/librarycontrol.cpp
  
      // Auto DJ controls
      m_pAutoDjAddTop = std::make_unique<ControlPushButton>(ConfigKey("[Library]", "AutoDjAddTop"));
-@@ -1070,6 +1117,330 @@
+@@ -1070,6 +1117,331 @@
      }
  }
  
@@ -435,16 +435,6 @@ diff --git a/src/library/librarycontrol.cpp b/src/library/librarycontrol.cpp
 +                    Qt::CaseInsensitive)) {
 +            continue;
 +        }
-+        if (pSidebarModel->rowCount(featureIndex) == 0) {
-+            // The Rekordbox device list is only populated by
-+            // RekordboxFeature::activate() (no startup scan in 2.5.0).
-+            // Trigger it via the model's clicked() handler. The scan runs
-+            // on a worker thread (QtConcurrent), so the re-scan below will
-+            // usually still find no children on this first attempt; in that
-+            // case we return an invalid index and the next button press
-+            // finds the populated list.
-+            pSidebarModel->clicked(featureIndex);
-+        }
 +        for (int j = 0; j < pSidebarModel->rowCount(featureIndex); ++j) {
 +            const QModelIndex deviceIndex =
 +                    pSidebarModel->index(j, 0, featureIndex);
@@ -454,7 +444,18 @@ diff --git a/src/library/librarycontrol.cpp b/src/library/librarycontrol.cpp
 +                return deviceIndex;
 +            }
 +        }
-+        return QModelIndex(); // Rekordbox found but device absent
++        // The requested device is not in the current list: either no scan
++        // has run yet (RekordboxFeature has no startup scan in 2.5.0), or
++        // the stick was mounted after the last scan -- the device list only
++        // refreshes on activation, which used to make a stick that was
++        // plugged in later invisible until the Rekordbox root was clicked
++        // in the full tree. Trigger a rescan via the model's clicked()
++        // handler. The scan runs on a worker thread (QtConcurrent) and
++        // onRekordboxDevicesFound applies it incrementally (already-listed
++        // devices are kept), so this press returns empty-handed and the
++        // next press finds the device.
++        pSidebarModel->clicked(featureIndex);
++        return QModelIndex(); // Rekordbox found but device absent (yet)
 +    }
 +    return QModelIndex(); // no Rekordbox feature
 +}
