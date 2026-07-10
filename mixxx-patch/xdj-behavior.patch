@@ -6,6 +6,10 @@ Description: XDJ-style behavior tweaks (waveform EQ decoupling, loop from cue)
     still apply.
  2. Pressing loop-out with no loop-in set creates a loop starting at the
     main cue point (Pioneer behavior), instead of being ignored.
+ 3. The Filter effect (deck filter super knob) gets a Pioneer-style response
+    curve: gamma-shaped cutoff mapping with a plateau near the neutral
+    position (LPF: 20 percent turn ~14.7 kHz, half turn ~2.6 kHz) and a
+    mildly resonant default Q of 1.2 instead of Butterworth 0.707.
 Author: Pioneered CI <pioneered-build@localhost>
 Forwarded: no
 
@@ -86,3 +90,76 @@ diff --git a/src/engine/controls/loopingcontrol.cpp b/src/engine/controls/loopin
      // If the user is trying to set a loop-out before the loop in or without
      // having a loop-in, then ignore it.
      if (!loopInfo.startPosition.isValid() || position <= loopInfo.startPosition) {
+diff --git a/src/effects/backends/builtin/filtereffect.cpp b/src/effects/backends/builtin/filtereffect.cpp
+--- a/src/effects/backends/builtin/filtereffect.cpp
++++ b/src/effects/backends/builtin/filtereffect.cpp
+@@ -8,6 +8,38 @@
+ namespace {
+ constexpr double kMinCorner = 13;    // Hz
+ constexpr double kMaxCorner = 22050; // Hz
++
++// Pioneered: reshape the knob-to-cutoff curve to feel like Pioneer hardware.
++// Stock Mixxx sweeps the full ~10.7 octaves linearly-in-log across the knob,
++// so a small turn already removes most of the musical content. The gamma
++// curve below creates a plateau near the neutral position and compresses the
++// aggressive cutting into the outer part of the throw:
++//   LPF at 20% turn ~14.7 kHz (barely audible), 50% ~2.6 kHz, 100% full cut.
++// Applies to whatever drives the lpf/hpf parameters (deck filter super knob
++// as well as the effect rack knobs).
++constexpr double kCurveGamma = 1.8;
++
++double shapeLpf(double lpf) {
++    if (lpf >= kMaxCorner) {
++        // exact corner value so the neutral-position bypass check still fires
++        return kMaxCorner;
++    }
++    double x = std::log(lpf / kMinCorner) / std::log(kMaxCorner / kMinCorner);
++    x = math_clamp(x, 0.0, 1.0); // x = 1 neutral, x = 0 full cut
++    const double y = 1.0 - std::pow(1.0 - x, kCurveGamma);
++    return kMinCorner * std::pow(kMaxCorner / kMinCorner, y);
++}
++
++double shapeHpf(double hpf) {
++    if (hpf <= kMinCorner) {
++        // exact corner value so the neutral-position bypass check still fires
++        return kMinCorner;
++    }
++    double x = std::log(hpf / kMinCorner) / std::log(kMaxCorner / kMinCorner);
++    x = math_clamp(x, 0.0, 1.0); // x = 0 neutral, x = 1 full cut
++    const double y = std::pow(x, kCurveGamma);
++    return kMinCorner * std::pow(kMaxCorner / kMinCorner, y);
++}
+ } // anonymous namespace
+ 
+ // static
+@@ -49,7 +81,9 @@
+             "Default: flat top")); // What does this mean?
+     q->setValueScaler(EffectManifestParameter::ValueScaler::Logarithmic);
+     q->setUnitsHint(EffectManifestParameter::UnitsHint::SampleRate);
+-    q->setRange(0.4, 0.707106781, 4.0); // 0.707106781 = Butterworth
++    // Pioneered: default raised from Butterworth (0.707) to a mild resonance
++    // so the sweep keeps some presence at the cutoff, like Pioneer filters
++    q->setRange(0.4, 1.2, 4.0);
+ 
+     EffectManifestParameterPointer hpf = pManifest->addParameter();
+     hpf->setId("hpf");
+@@ -69,7 +103,7 @@
+ FilterGroupState::FilterGroupState(const mixxx::EngineParameters& engineParameters)
+         : EffectState(engineParameters),
+           m_loFreq(kMaxCorner),
+-          m_q(0.707106781),
++          m_q(1.2),
+           m_hiFreq(kMinCorner) {
+     m_buffer = mixxx::SampleBuffer(engineParameters.samplesPerBuffer());
+     m_pLowFilter = new EngineFilterBiquad1Low(engineParameters.sampleRate(), m_loFreq, m_q, true);
+@@ -106,8 +140,8 @@
+         hpf = kMinCorner;
+         lpf = kMaxCorner;
+     } else {
+-        hpf = m_pHPF->value();
+-        lpf = m_pLPF->value();
++        hpf = shapeHpf(m_pHPF->value());
++        lpf = shapeLpf(m_pLPF->value());
+     }
+ 
+     if ((pState->m_loFreq != lpf) ||
