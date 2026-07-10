@@ -1,0 +1,685 @@
+Description: XDJ library UI rework (zoom pref, # sort, key traffic light, columns)
+ 1. New Preferences > Library spinner "Tracks visible in list" (config
+    [Library] VisibleRows, default 8, 0 = Off): the library table derives
+    row height from the viewport so exactly N rows fit, and scales the
+    font to ~45% of the row height (true zoom for small touch displays).
+    Off falls back to the stock manual RowHeight/Font settings.
+ 2. Rekordbox track lists and playlists always open sorted by # (playlist
+    position) ascending. Root cause: RekordboxPlaylistModel declared the
+    position column as its default sort but the view preferred the saved
+    header sort state; a new TrackModel::forceDefaultSort() hook lets the
+    model reassert its default on every load.
+ 3. Pioneer-style key traffic light: the Key cell is highlighted green
+    when the track's key is Camelot-compatible (same key, relative
+    major/minor, +/-1 step; KeyUtils::getCompatibleKeys) with the master
+    deck's track. Master = the currently playing deck that started
+    playing most recently; when no deck is playing nothing is
+    highlighted. Keys are always displayed as musical note names
+    (Traditional notation), never Camelot numbers.
+ 4. Rekordbox views show a fixed column set: #, Title, Artist, Key,
+    Duration.
+Author: Pioneered CI <pioneered-build@localhost>
+Forwarded: no
+
+--- a/src/preferences/dialog/dlgpreflibrarydlg.ui
++++ b/src/preferences/dialog/dlgpreflibrarydlg.ui
+@@ -287,6 +287,33 @@
+        </widget>
+       </item>
+ 
++      <item row="11" column="0">
++       <widget class="QLabel" name="label_visibleRows">
++        <property name="text">
++         <string>Tracks visible in list:</string>
++        </property>
++        <property name="alignment">
++         <set>Qt::AlignLeft|Qt::AlignVCenter</set>
++        </property>
++       </widget>
++      </item>
++      <item row="11" column="1" colspan="2">
++       <widget class="QSpinBox" name="spinBox_visible_rows">
++        <property name="specialValueText">
++         <string>Off</string>
++        </property>
++        <property name="minimum">
++         <number>0</number>
++        </property>
++        <property name="maximum">
++         <number>20</number>
++        </property>
++        <property name="value">
++         <number>8</number>
++        </property>
++       </widget>
++      </item>
++
+      </layout>
+     </widget>
+    </item><!-- Track Table View -->
+--- a/src/preferences/dialog/dlgpreflibrary.h
++++ b/src/preferences/dialog/dlgpreflibrary.h
+@@ -61,6 +61,7 @@ class DlgPrefLibrary : public DlgPreferencePage, public Ui::DlgPrefLibraryDlg  {
+ 
+   private slots:
+     void slotRowHeightValueChanged(int);
++    void slotVisibleRowsValueChanged(int);
+     void slotSelectFont();
+     void slotSyncTrackMetadataToggled();
+     void slotSearchDebouncingTimeoutMillisChanged(int);
+@@ -80,6 +81,7 @@ class DlgPrefLibrary : public DlgPreferencePage, public Ui::DlgPrefLibraryDlg  {
+     bool m_bAddedDirectory;
+     QFont m_originalTrackTableFont;
+     int m_iOriginalTrackTableRowHeight;
++    int m_iOriginalVisibleRows;
+     // Listen to rate range changes in order to update the fuzzy BPM range
+     parented_ptr<ControlProxy> m_pRateRangeDeck1;
+ };
+--- a/src/preferences/dialog/dlgpreflibrary.cpp
++++ b/src/preferences/dialog/dlgpreflibrary.cpp
+@@ -38,6 +38,7 @@ DlgPrefLibrary::DlgPrefLibrary(
+           m_pLibrary(pLibrary),
+           m_bAddedDirectory(false),
+           m_iOriginalTrackTableRowHeight(Library::kDefaultRowHeightPx),
++          m_iOriginalVisibleRows(Library::kDefaultVisibleRows),
+           m_pRateRangeDeck1(make_parented<ControlProxy>(
+                   QStringLiteral("[Channel1]"), QStringLiteral("rateRange"), this)) {
+     setupUi(this);
+@@ -73,6 +74,12 @@ DlgPrefLibrary::DlgPrefLibrary(
+             this,
+             &DlgPrefLibrary::slotRowHeightValueChanged);
+ 
++    spinBox_visible_rows->setValue(m_pLibrary->getTrackTableVisibleRows());
++    connect(spinBox_visible_rows,
++            QOverload<int>::of(&QSpinBox::valueChanged),
++            this,
++            &DlgPrefLibrary::slotVisibleRowsValueChanged);
++
+     spinbox_bpm_precision->setMinimum(BaseTrackTableModel::kBpmColumnPrecisionMinimum);
+     spinbox_bpm_precision->setMaximum(BaseTrackTableModel::kBpmColumnPrecisionMaximum);
+     connect(spinbox_bpm_precision,
+@@ -251,6 +258,7 @@ void DlgPrefLibrary::slotResetToDefaults() {
+     radioButton_cover_art_fetcher_medium->setChecked(true);
+ 
+     spinBox_row_height->setValue(Library::kDefaultRowHeightPx);
++    spinBox_visible_rows->setValue(Library::kDefaultVisibleRows);
+     setLibraryFont(QApplication::font());
+     spinBox_search_debouncing_timeout->setValue(
+             WSearchLineEdit::kDefaultDebouncingTimeoutMillis);
+@@ -351,6 +359,8 @@ void DlgPrefLibrary::slotUpdate() {
+     m_originalTrackTableFont = m_pLibrary->getTrackTableFont();
+     m_iOriginalTrackTableRowHeight = m_pLibrary->getTrackTableRowHeight();
+     spinBox_row_height->setValue(m_iOriginalTrackTableRowHeight);
++    m_iOriginalVisibleRows = m_pLibrary->getTrackTableVisibleRows();
++    spinBox_visible_rows->setValue(m_iOriginalVisibleRows);
+     setLibraryFont(m_originalTrackTableFont);
+ 
+     const auto searchDebouncingTimeoutMillis =
+@@ -387,6 +397,7 @@ void DlgPrefLibrary::slotCancel() {
+     // Undo any changes in the library font or row height.
+     m_pLibrary->setFont(m_originalTrackTableFont);
+     m_pLibrary->setRowHeight(m_iOriginalTrackTableRowHeight);
++    m_pLibrary->setVisibleRows(m_iOriginalVisibleRows);
+ }
+ 
+ void DlgPrefLibrary::slotAddDir() {
+@@ -580,6 +591,13 @@ void DlgPrefLibrary::slotApply() {
+                        ConfigValue(rowHeight));
+     }
+ 
++    const int visibleRows = spinBox_visible_rows->value();
++    if (m_iOriginalVisibleRows != visibleRows) {
++        m_pConfig->set(ConfigKey("[Library]", "VisibleRows"),
++                       ConfigValue(visibleRows));
++        m_iOriginalVisibleRows = visibleRows;
++    }
++
+     BaseTrackTableModel::setApplyPlayedTrackColor(
+             checkbox_played_track_color->isChecked());
+     m_pConfig->set(
+@@ -594,6 +612,10 @@ void DlgPrefLibrary::slotRowHeightValueChanged(int height) {
+     m_pLibrary->setRowHeight(height);
+ }
+ 
++void DlgPrefLibrary::slotVisibleRowsValueChanged(int visibleRows) {
++    m_pLibrary->setVisibleRows(visibleRows);
++}
++
+ void DlgPrefLibrary::setLibraryFont(const QFont& font) {
+     lineEdit_library_font->setText(
+             QString("%1 %2 %3pt")
+--- a/src/library/library.h
++++ b/src/library/library.h
+@@ -82,6 +82,10 @@ class Library: public QObject {
+         return m_iTrackTableRowHeight;
+     }
+ 
++    int getTrackTableVisibleRows() const {
++        return m_iTrackTableVisibleRows;
++    }
++
+     const QFont& getTrackTableFont() const {
+         return m_trackTableFont;
+     }
+@@ -99,9 +103,11 @@ class Library: public QObject {
+     //static Library* buildDefaultLibrary();
+ 
+     static const int kDefaultRowHeightPx;
++    static const int kDefaultVisibleRows;
+ 
+     void setFont(const QFont& font);
+     void setRowHeight(int rowHeight);
++    void setVisibleRows(int visibleRows);
+     void setEditMetadataSelectedClick(bool enable);
+ 
+     /// Triggers a new search in the internal track collection
+@@ -152,6 +158,7 @@ class Library: public QObject {
+ 
+     void setTrackTableFont(const QFont& font);
+     void setTrackTableRowHeight(int rowHeight);
++    void setTrackTableVisibleRows(int visibleRows);
+     void setSelectedClick(bool enable);
+ 
+   private slots:
+@@ -180,6 +187,7 @@ class Library: public QObject {
+     BrowseFeature* m_pBrowseFeature;
+     QFont m_trackTableFont;
+     int m_iTrackTableRowHeight;
++    int m_iTrackTableVisibleRows;
+     bool m_editMetadataSelectedClick;
+     QScopedPointer<ControlObject> m_pKeyNotation;
+ };
+--- a/src/library/library.cpp
++++ b/src/library/library.cpp
+@@ -56,6 +56,10 @@ const QString Library::m_sTrackViewName = QString("WTrackTableView");
+ // The default row height of the library.
+ const int Library::kDefaultRowHeightPx = 20;
+ 
++// XDJ: default number of tracks visible in the library table (0 = off,
++// fall back to the manual RowHeight setting).
++const int Library::kDefaultVisibleRows = 8;
++
+ Library::Library(
+         QObject* parent,
+         UserSettingsPointer pConfig,
+@@ -242,6 +246,8 @@ Library::Library(
+ 
+     m_iTrackTableRowHeight = m_pConfig->getValue(
+             ConfigKey(kConfigGroup, "RowHeight"), kDefaultRowHeightPx);
++    m_iTrackTableVisibleRows = m_pConfig->getValue(
++            ConfigKey(kConfigGroup, "VisibleRows"), kDefaultVisibleRows);
+     QString fontStr =
+             m_pConfig->getValueString(ConfigKey(kConfigGroup, "Font"));
+     if (!fontStr.isEmpty()) {
+@@ -436,6 +442,10 @@ void Library::bindLibraryWidget(
+             &Library::setTrackTableRowHeight,
+             pTrackTableView,
+             &WTrackTableView::setTrackTableRowHeight);
++    connect(this,
++            &Library::setTrackTableVisibleRows,
++            pTrackTableView,
++            &WTrackTableView::setTrackTableVisibleRows);
+     connect(this,
+             &Library::setSelectedClick,
+             pTrackTableView,
+@@ -460,6 +470,7 @@ void Library::bindLibraryWidget(
+     // just connected to us.
+     emit setTrackTableFont(m_trackTableFont);
+     emit setTrackTableRowHeight(m_iTrackTableRowHeight);
++    emit setTrackTableVisibleRows(m_iTrackTableVisibleRows);
+     emit setSelectedClick(m_editMetadataSelectedClick);
+ }
+ 
+@@ -712,6 +723,11 @@ void Library::setRowHeight(int rowHeight) {
+     emit setTrackTableRowHeight(rowHeight);
+ }
+ 
++void Library::setVisibleRows(int visibleRows) {
++    m_iTrackTableVisibleRows = visibleRows;
++    emit setTrackTableVisibleRows(visibleRows);
++}
++
+ void Library::setEditMetadataSelectedClick(bool enabled) {
+     m_editMetadataSelectedClick = enabled;
+     emit setSelectedClick(enabled);
+--- a/src/widget/wlibrarytableview.h
++++ b/src/widget/wlibrarytableview.h
+@@ -10,6 +10,7 @@
+ #include "track/track_decl.h"
+ 
+ class QFont;
++class QResizeEvent;
+ 
+ class WLibraryTableView : public QTableView, public virtual LibraryView {
+     Q_OBJECT
+@@ -65,10 +66,12 @@ class WLibraryTableView : public QTableView, public virtual LibraryView {
+   public slots:
+     void setTrackTableFont(const QFont& font);
+     void setTrackTableRowHeight(int rowHeight);
++    void setTrackTableVisibleRows(int visibleRows);
+     void setSelectedClick(bool enable);
+ 
+   protected:
+     void focusInEvent(QFocusEvent* event) override;
++    void resizeEvent(QResizeEvent* event) override;
+     QModelIndex moveCursor(CursorAction cursorAction,
+             Qt::KeyboardModifiers modifiers) override;
+     virtual QString getModelStateKey() const = 0;
+@@ -77,6 +80,14 @@ class WLibraryTableView : public QTableView, public virtual LibraryView {
+     int m_prevColumn;
+ 
+   private:
++    void applyFont(const QFont& font);
++    void applyVisibleRows();
++
+     const UserSettingsPointer m_pConfig;
+     QCache<QString, ModelState> m_modelStateCache;
++    // XDJ visible-rows zoom: > 0 means row height and font are derived from
++    // the viewport height so exactly this many rows fit; 0 = manual sizing.
++    int m_visibleRows = 0;
++    int m_manualRowHeight = 20;
++    QFont m_baseTrackTableFont;
+ };
+--- a/src/widget/wlibrarytableview.cpp
++++ b/src/widget/wlibrarytableview.cpp
+@@ -5,6 +5,7 @@
+ #include <QFontMetrics>
+ #include <QHeaderView>
+ #include <QHelpEvent>
++#include <QResizeEvent>
+ #include <QScrollBar>
+ #include <QToolTip>
+ 
+@@ -171,6 +172,15 @@ void WLibraryTableView::restoreCurrentIndex(const QModelIndex& index) {
+ }
+ 
+ void WLibraryTableView::setTrackTableFont(const QFont& font) {
++    m_baseTrackTableFont = font;
++    if (m_visibleRows > 0) {
++        applyVisibleRows();
++    } else {
++        applyFont(font);
++    }
++}
++
++void WLibraryTableView::applyFont(const QFont& font) {
+     setFont(font);
+     QFontMetrics metrics(font);
+     verticalHeader()->setMinimumSectionSize(metrics.height());
+@@ -188,10 +198,47 @@ void WLibraryTableView::setTrackTableFont(const QFont& font) {
+ }
+ 
+ void WLibraryTableView::setTrackTableRowHeight(int rowHeight) {
++    m_manualRowHeight = rowHeight;
++    if (m_visibleRows > 0) {
++        // Row height is derived from the viewport in visible-rows mode.
++        return;
++    }
+     verticalHeader()->setDefaultSectionSize(math_max(
+             rowHeight, verticalHeader()->minimumSectionSize()));
+ }
+ 
++void WLibraryTableView::setTrackTableVisibleRows(int visibleRows) {
++    m_visibleRows = visibleRows;
++    if (m_visibleRows > 0) {
++        applyVisibleRows();
++    } else {
++        applyFont(m_baseTrackTableFont);
++        verticalHeader()->setDefaultSectionSize(math_max(
++                m_manualRowHeight, verticalHeader()->minimumSectionSize()));
++    }
++}
++
++void WLibraryTableView::applyVisibleRows() {
++    if (m_visibleRows <= 0) {
++        return;
++    }
++    const int viewportHeight = viewport()->height();
++    if (viewportHeight <= 0) {
++        // Not laid out yet; resizeEvent() will retry.
++        return;
++    }
++    const int rowHeight = math_max(8, viewportHeight / m_visibleRows);
++    QFont font = m_baseTrackTableFont;
++    font.setPixelSize(math_max(8, static_cast<int>(rowHeight * 0.45)));
++    applyFont(font);
++    verticalHeader()->setDefaultSectionSize(rowHeight);
++}
++
++void WLibraryTableView::resizeEvent(QResizeEvent* event) {
++    QTableView::resizeEvent(event);
++    applyVisibleRows();
++}
++
+ void WLibraryTableView::setSelectedClick(bool enable) {
+     if (enable) {
+         setEditTriggers(QAbstractItemView::SelectedClicked|QAbstractItemView::EditKeyPressed);
+--- a/src/widget/wtracktableview.cpp
++++ b/src/widget/wtracktableview.cpp
+@@ -178,6 +178,13 @@ void WTrackTableView::loadTrackModel(QAbstractItemModel* model, bool restoreStat
+     // If the model has not changed there's no need to exchange the headers
+     // which would cause a small GUI freeze
+     if (getTrackModel() == pTrackModel) {
++        if (m_sorting && pTrackModel->forceDefaultSort()) {
++            // XDJ: reassert the model's default sort (e.g. rekordbox # asc)
++            // instead of whatever the header last remembered.
++            horizontalHeader()->setSortIndicator(
++                    pTrackModel->defaultSortColumn(),
++                    pTrackModel->defaultSortOrder());
++        }
+         // Re-sort the table even if the track model is the same. This triggers
+         // a select() if the table is dirty.
+         doSortByColumn(horizontalHeader()->sortIndicatorSection(),
+@@ -286,7 +293,8 @@ void WTrackTableView::loadTrackModel(QAbstractItemModel* model, bool restoreStat
+         TrackModel::SortColumnId sortColumn =
+                 pTrackModel->sortColumnIdFromColumnIndex(
+                         horizontalHeader()->sortIndicatorSection());
+-        if (sortColumn != TrackModel::SortColumnId::Invalid) {
++        if (sortColumn != TrackModel::SortColumnId::Invalid &&
++                !pTrackModel->forceDefaultSort()) {
+             // Sort by the saved sort section and order.
+             sortOrder = horizontalHeader()->sortIndicatorOrder();
+         } else {
+--- a/src/library/trackmodel.h
++++ b/src/library/trackmodel.h
+@@ -225,6 +225,12 @@ class TrackModel {
+         m_eDefaultSortOrder = sortOrder;
+     }
+ 
++    /// XDJ: when true the view always applies defaultSortColumn()/
++    /// defaultSortOrder() on model load, ignoring any saved header sort state.
++    virtual bool forceDefaultSort() const {
++        return false;
++    }
++
+     virtual bool isColumnSortable(int column) const {
+         Q_UNUSED(column);
+         return true;
+--- a/src/library/rekordbox/rekordboxfeature.h
++++ b/src/library/rekordbox/rekordboxfeature.h
+@@ -48,6 +48,7 @@ class RekordboxPlaylistModel : public BaseExternalPlaylistModel {
+     TrackPointer getTrack(const QModelIndex& index) const override;
+     bool isColumnHiddenByDefault(int column) override;
+     bool isColumnInternal(int column) override;
++    bool forceDefaultSort() const override;
+ 
+   protected:
+     void initSortColumnMapping() override;
+--- a/src/library/rekordbox/rekordboxfeature.cpp
++++ b/src/library/rekordbox/rekordboxfeature.cpp
+@@ -1303,15 +1303,27 @@ TrackPointer RekordboxPlaylistModel::getTrack(const QModelIndex& index) const {
+ }
+ 
+ bool RekordboxPlaylistModel::isColumnHiddenByDefault(int column) {
+-    if (column == fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_BITRATE)) {
+-        return true;
+-    }
+-    return BaseSqlTableModel::isColumnHiddenByDefault(column);
++    Q_UNUSED(column);
++    // XDJ: the visible column set is fixed via isColumnInternal().
++    return false;
+ }
+ 
+ bool RekordboxPlaylistModel::isColumnInternal(int column) {
+-    return column == fieldIndex(ColumnCache::COLUMN_REKORDBOX_ANALYZE_PATH) ||
+-            BaseExternalPlaylistModel::isColumnInternal(column);
++    // XDJ: fixed appliance column set — #, Title, Artist, Key, Duration.
++    if (column == fieldIndex(ColumnCache::COLUMN_PLAYLISTTRACKSTABLE_POSITION) ||
++            column == fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_TITLE) ||
++            column == fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_ARTIST) ||
++            column == fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_KEY) ||
++            column == fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_DURATION)) {
++        return false;
++    }
++    return true;
++}
++
++bool RekordboxPlaylistModel::forceDefaultSort() const {
++    // XDJ: always come up sorted by # (playlist position) ascending,
++    // regardless of any saved header sort state.
++    return true;
+ }
+ 
+ RekordboxFeature::RekordboxFeature(
+--- a/src/library/basetracktablemodel.h
++++ b/src/library/basetracktablemodel.h
+@@ -19,7 +19,7 @@ class BaseTrackTableModel : public QAbstractTableModel, public TrackModel {
+             QObject* parent,
+             TrackCollectionManager* const pTrackCollectionManager,
+             const char* settingsNamespace);
+-    ~BaseTrackTableModel() override = default;
++    ~BaseTrackTableModel() override;
+ 
+     ///////////////////////////////////////////////////////
+     //  Overridable functions
+--- a/src/library/basetracktablemodel.cpp
++++ b/src/library/basetracktablemodel.cpp
+@@ -1,9 +1,17 @@
+ #include "library/basetracktablemodel.h"
+ 
+ #include <QBuffer>
++#include <QDateTime>
+ #include <QGuiApplication>
+ #include <QMimeData>
+ #include <QScreen>
++#include <QSet>
++
++#include <functional>
++#include <memory>
++
++#include "control/controlobject.h"
++#include "control/controlproxy.h"
+ 
+ #include "library/coverartcache.h"
+ #include "library/dao/trackschema.h"
+@@ -95,6 +103,144 @@ QSqlDatabase cloneDatabase(
+             pTrackCollectionManager->internalCollection()->database());
+ }
+ 
++// XDJ traffic-light: tracks the "master" deck for key-compatibility
++// highlighting. Master = the currently playing deck that started playing
++// most recently (i.e. has been playing for the least wall-clock time).
++// No deck playing -> no master -> no highlighting.
++class XdjMasterKeyTracker {
++  public:
++    static XdjMasterKeyTracker& instance() {
++        static XdjMasterKeyTracker s_instance;
++        return s_instance;
++    }
++
++    void registerModel(QObject* pModel, std::function<void()> refresh) {
++        ensureInitialized();
++        m_models.append(qMakePair(pModel, std::move(refresh)));
++    }
++
++    void unregisterModel(QObject* pModel) {
++        for (int i = m_models.size() - 1; i >= 0; --i) {
++            if (m_models.at(i).first == pModel) {
++                m_models.removeAt(i);
++            }
++        }
++    }
++
++    bool isCompatibleKeyText(const QString& keyText) const {
++        if (m_compatibleKeys.isEmpty() || keyText.isEmpty()) {
++            return false;
++        }
++        const mixxx::track::io::key::ChromaticKey key =
++                KeyUtils::guessKeyFromText(keyText);
++        if (key == mixxx::track::io::key::INVALID) {
++            return false;
++        }
++        return m_compatibleKeys.contains(static_cast<int>(key));
++    }
++
++  private:
++    static constexpr int kMaxDecks = 4;
++
++    struct DeckState {
++        std::unique_ptr<ControlProxy> pPlay;
++        QString group;
++        qint64 playStartMs = -1;
++        bool playing = false;
++    };
++
++    XdjMasterKeyTracker() = default;
++
++    void ensureInitialized() {
++        if (m_initialized) {
++            return;
++        }
++        m_initialized = true;
++        m_pContext = std::make_unique<QObject>();
++        for (int i = 0; i < kMaxDecks; ++i) {
++            const QString group = QStringLiteral("[Channel%1]").arg(i + 1);
++            const ConfigKey playKey(group, QStringLiteral("play"));
++            if (!ControlObject::exists(playKey)) {
++                continue;
++            }
++            auto& deck = m_decks[i];
++            deck.group = group;
++            deck.pPlay = std::make_unique<ControlProxy>(playKey, m_pContext.get());
++            deck.pPlay->connectValueChanged(m_pContext.get(), [this, i](double v) {
++                onPlayChanged(i, v > 0);
++            });
++            deck.playing = deck.pPlay->toBool();
++            if (deck.playing) {
++                deck.playStartMs = QDateTime::currentMSecsSinceEpoch();
++            }
++        }
++        QObject::connect(&PlayerInfo::instance(),
++                &PlayerInfo::trackChanged,
++                m_pContext.get(),
++                [this](const QString& group, TrackPointer, TrackPointer) {
++                    if (group == m_masterGroup) {
++                        updateMaster();
++                    }
++                });
++        updateMaster();
++    }
++
++    void onPlayChanged(int deckIndex, bool playing) {
++        auto& deck = m_decks[deckIndex];
++        if (playing && !deck.playing) {
++            deck.playStartMs = QDateTime::currentMSecsSinceEpoch();
++        }
++        deck.playing = playing;
++        updateMaster();
++    }
++
++    void updateMaster() {
++        // Master = playing deck with the latest start time.
++        QString masterGroup;
++        qint64 latestStart = -1;
++        for (const auto& deck : m_decks) {
++            if (deck.playing && deck.playStartMs > latestStart) {
++                latestStart = deck.playStartMs;
++                masterGroup = deck.group;
++            }
++        }
++        m_masterGroup = masterGroup;
++
++        QSet<int> compatible;
++        if (!masterGroup.isEmpty()) {
++            const TrackPointer pTrack =
++                    PlayerInfo::instance().getTrackInfo(masterGroup);
++            if (pTrack) {
++                mixxx::track::io::key::ChromaticKey key = pTrack->getKey();
++                if (key == mixxx::track::io::key::INVALID) {
++                    key = KeyUtils::guessKeyFromText(pTrack->getKeyText());
++                }
++                if (key != mixxx::track::io::key::INVALID) {
++                    const QList<mixxx::track::io::key::ChromaticKey> keys =
++                            KeyUtils::getCompatibleKeys(key);
++                    for (const auto compatibleKey : keys) {
++                        compatible.insert(static_cast<int>(compatibleKey));
++                    }
++                }
++            }
++        }
++        if (compatible == m_compatibleKeys) {
++            return;
++        }
++        m_compatibleKeys = compatible;
++        for (const auto& entry : std::as_const(m_models)) {
++            entry.second();
++        }
++    }
++
++    bool m_initialized = false;
++    std::unique_ptr<QObject> m_pContext;
++    DeckState m_decks[kMaxDecks];
++    QString m_masterGroup;
++    QSet<int> m_compatibleKeys;
++    QList<QPair<QObject*, std::function<void()>>> m_models;
++};
++
+ } // anonymous namespace
+ 
+ // static
+@@ -154,6 +300,21 @@ BaseTrackTableModel::BaseTrackTableModel(
+                 this,
+                 &BaseTrackTableModel::slotCoverFound);
+     }
++    XdjMasterKeyTracker::instance().registerModel(this, [this] {
++        // Repaint the key column's traffic-light backgrounds.
++        const int rows = rowCount();
++        const int columns = columnCount();
++        if (rows > 0 && columns > 0) {
++            emit dataChanged(
++                    index(0, 0),
++                    index(rows - 1, columns - 1),
++                    {Qt::BackgroundRole});
++        }
++    });
++}
++
++BaseTrackTableModel::~BaseTrackTableModel() {
++    XdjMasterKeyTracker::instance().unregisterModel(this);
+ }
+ 
+ void BaseTrackTableModel::initTableColumnsAndHeaderProperties(
+@@ -520,6 +681,19 @@ QVariant BaseTrackTableModel::data(
+     }
+ 
+     if (role == Qt::BackgroundRole) {
++        if (mapColumn(index.column()) == ColumnCache::COLUMN_LIBRARYTABLE_KEY) {
++            // XDJ traffic-light: key cell is green when compatible with the
++            // master deck's key, otherwise unpainted (never the row color).
++            const QVariant composedKey = KeyUtils::keyFromKeyTextAndIdFields(
++                    rawValue(index),
++                    rawSiblingValue(index,
++                            ColumnCache::COLUMN_LIBRARYTABLE_KEY_ID));
++            if (XdjMasterKeyTracker::instance().isCompatibleKeyText(
++                        composedKey.toString())) {
++                return QBrush(QColor(0, 179, 74, 200));
++            }
++            return QVariant();
++        }
+         const auto rgbColorValue = rawSiblingValue(
+                 index,
+                 ColumnCache::COLUMN_LIBRARYTABLE_COLOR);
+@@ -872,12 +1046,21 @@ QVariant BaseTrackTableModel::roleValue(
+                 }
+             }
+         }
+-        case ColumnCache::COLUMN_LIBRARYTABLE_KEY:
++        case ColumnCache::COLUMN_LIBRARYTABLE_KEY: {
+             // The Key value is determined by either the KEY_ID or KEY column
+-            return KeyUtils::keyFromKeyTextAndIdFields(
++            const QVariant composedKey = KeyUtils::keyFromKeyTextAndIdFields(
+                     rawValue,
+                     rawSiblingValue(
+                             index, ColumnCache::COLUMN_LIBRARYTABLE_KEY_ID));
++            // XDJ: always display musical note names, never Camelot numbers.
++            const mixxx::track::io::key::ChromaticKey guessedKey =
++                    KeyUtils::guessKeyFromText(composedKey.toString());
++            if (guessedKey != mixxx::track::io::key::INVALID) {
++                return KeyUtils::keyToString(guessedKey,
++                        KeyUtils::KeyNotation::Traditional);
++            }
++            return composedKey;
++        }
+         case ColumnCache::COLUMN_LIBRARYTABLE_REPLAYGAIN: {
+             if (rawValue.isNull()) {
+                 return QVariant();

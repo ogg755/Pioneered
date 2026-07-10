@@ -2,8 +2,10 @@
 
 ## Skin
 scp -r Pioneered rpims@XDJ400.local:~/.mixxx/skins/
-Select in Preferences > Interface. Required library prefs:
-Preferences > Library > row height 48 px, font size ~14 pt.
+Select in Preferences > Interface. Library sizing (library-ui patch, r10+):
+Preferences > Library > "Tracks visible in list" (default 8) sizes rows and
+font automatically; set it to Off to use the old manual row height/font
+(48 px / ~14 pt on unpatched builds).
 
 ## Patched Mixxx (USB A/B buttons)
 The skin's USB A/USB B buttons need the patched Mixxx build

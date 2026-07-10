@@ -16,3 +16,16 @@
 > Debian release shipping a 2.5.0 build (bookworm has 2.3.3, sid/forky have
 > 2.5.6). **Re-verify with `apt policy mixxx` on the Pi at deploy time
 > (Task 7) before installing the built .deb.**
+
+## Patch series (applied in this order by CI)
+
+1. `usb-browse.patch` — touch browse + hold-to-eject (field-verified r8.1)
+2. `pdb-corruption-hardening.patch` — PDB segfault fixes (field-verified r8.1)
+3. `xdj-behavior.patch` — waveform EQ decoupling, loop from cue, Filter curve
+   (shipped r9.1, awaiting field test)
+4. `library-ui.patch` (added 2026-07-11) — "Tracks visible in list" zoom
+   preference (`[Library] VisibleRows`, default 8), rekordbox lists always
+   open sorted by # ascending, Pioneer-style key traffic light vs the master
+   deck (master = playing deck that started most recently; green = Camelot
+   compatible; keys shown as note names), fixed rekordbox column set
+   (#, Title, Artist, Key, Duration).

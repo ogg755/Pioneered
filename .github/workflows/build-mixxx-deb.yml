@@ -27,6 +27,7 @@ jobs:
           patch -p1 < "$GITHUB_WORKSPACE/mixxx-patch/usb-browse.patch"
           patch -p1 < "$GITHUB_WORKSPACE/mixxx-patch/pdb-corruption-hardening.patch"
           patch -p1 < "$GITHUB_WORKSPACE/mixxx-patch/xdj-behavior.patch"
+          patch -p1 < "$GITHUB_WORKSPACE/mixxx-patch/library-ui.patch"
           DEBEMAIL=pioneered-build@localhost DEBFULLNAME="Pioneered CI" \
             dch --local "+usbbrowse.r${GITHUB_RUN_NUMBER}." "Pioneered USB browse/eject patch build ${GITHUB_RUN_NUMBER}"
 
