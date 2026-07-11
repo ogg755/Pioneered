@@ -16,8 +16,11 @@ Description: XDJ library UI rework (zoom pref, # sort, key traffic light, column
     playing most recently; when no deck is playing nothing is
     highlighted. Keys are always displayed as musical note names
     (Traditional notation), never Camelot numbers.
- 4. Rekordbox views show a fixed column set: #, Title, Artist, Key,
-    Duration.
+ 4. Rekordbox views show a fixed column set in the visual order
+    #, Title, Artist, Key, Duration, with proportional widths that fill
+    the viewport (# / Key / Duration sized to content, Artist/Title
+    sharing the rest 40/60, Duration stretching to the right edge),
+    recomputed on every resize.
 Author: Pioneered CI <pioneered-build@localhost>
 Forwarded: no
 
@@ -354,6 +357,19 @@ Forwarded: no
  void WLibraryTableView::setSelectedClick(bool enable) {
      if (enable) {
          setEditTriggers(QAbstractItemView::SelectedClicked|QAbstractItemView::EditKeyPressed);
+--- a/src/widget/wtracktableview.h
++++ b/src/widget/wtracktableview.h
+@@ -162,6 +162,10 @@ class WTrackTableView : public WLibraryTableView {
+ 
+     void initTrackMenu();
+ 
++    // XDJ: proportional column widths + visual order for models with a
++    // fixed appliance column layout (#, Title, Artist, Key, Duration).
++    void applyFixedColumnWidths();
++
+     void hideOrRemoveSelectedTracks();
+ 
+     const UserSettingsPointer m_pConfig;
 --- a/src/widget/wtracktableview.cpp
 +++ b/src/widget/wtracktableview.cpp
 @@ -178,6 +178,13 @@ void WTrackTableView::loadTrackModel(QAbstractItemModel* model, bool restoreStat
@@ -380,9 +396,113 @@ Forwarded: no
              // Sort by the saved sort section and order.
              sortOrder = horizontalHeader()->sortIndicatorOrder();
          } else {
+@@ -335,6 +343,11 @@ void WTrackTableView::loadTrackModel(QAbstractItemModel* model, bool restoreStat
+     // haven't been able to get it to stop us from using a model as a drag
+     // target though, so my hacks above may not be completely unjustified.
+ 
++    // XDJ: fixed appliance column layout for rekordbox views — the last
++    // visual column (Duration) stretches to the right edge.
++    horizontalHeader()->setStretchLastSection(pTrackModel->fixedColumnLayout());
++    applyFixedColumnWidths();
++
+     setVisible(true);
+ 
+     // trigger restoring scrollBar position, selection etc.
+@@ -344,6 +357,59 @@ void WTrackTableView::loadTrackModel(QAbstractItemModel* model, bool restoreStat
+     initTrackMenu();
+ }
+ 
++void WTrackTableView::applyFixedColumnWidths() {
++    TrackModel* pTrackModel = getTrackModel();
++    if (!pTrackModel || !pTrackModel->fixedColumnLayout()) {
++        return;
++    }
++    const int posColumn = pTrackModel->fieldIndex(QStringLiteral("position"));
++    const int artistColumn = pTrackModel->fieldIndex(QStringLiteral("artist"));
++    const int titleColumn = pTrackModel->fieldIndex(QStringLiteral("title"));
++    const int keyColumn = pTrackModel->fieldIndex(QStringLiteral("key"));
++    const int durationColumn = pTrackModel->fieldIndex(QStringLiteral("duration"));
++    if (posColumn < 0 || artistColumn < 0 || titleColumn < 0 ||
++            keyColumn < 0 || durationColumn < 0) {
++        return;
++    }
++
++    // Visual order: #, Title, Artist, Key, Duration.
++    QHeaderView* pHeader = horizontalHeader();
++    const int logicalOrder[] = {
++            posColumn, titleColumn, artistColumn, keyColumn, durationColumn};
++    int visualTarget = 0;
++    for (const int logical : logicalOrder) {
++        const int visual = pHeader->visualIndex(logical);
++        if (visual >= 0 && visual != visualTarget) {
++            pHeader->moveSection(visual, visualTarget);
++        }
++        ++visualTarget;
++    }
++
++    const int viewportWidth = viewport()->width();
++    if (viewportWidth <= 0) {
++        return;
++    }
++    const QFontMetrics metrics(font());
++    // Content-sized columns: # plus sort arrow, key names, m:ss durations.
++    const int posWidth = metrics.horizontalAdvance(QStringLiteral("9999")) + 24;
++    const int keyWidth = metrics.horizontalAdvance(QStringLiteral("A#m")) + 24;
++    const int durationWidth =
++            metrics.horizontalAdvance(QStringLiteral("88:88")) + 16;
++    int remaining = viewportWidth - posWidth - keyWidth - durationWidth;
++    if (remaining < 120) {
++        remaining = 120;
++    }
++    // Artist/Title share the rest 40/60.
++    const int artistWidth = remaining * 2 / 5;
++    const int titleWidth = remaining - artistWidth;
++    setColumnWidth(posColumn, posWidth);
++    setColumnWidth(titleColumn, titleWidth);
++    setColumnWidth(artistColumn, artistWidth);
++    setColumnWidth(keyColumn, keyWidth);
++    // durationColumn is the last visual section and stretches to fill
++    // the remaining width (setStretchLastSection in loadTrackModel).
++}
++
+ void WTrackTableView::initTrackMenu() {
+     auto* pTrackModel = getTrackModel();
+     DEBUG_ASSERT(pTrackModel);
+@@ -1161,7 +1227,10 @@ void WTrackTableView::resizeEvent(QResizeEvent* event) {
+     int newHeight = event->size().height();
+ 
+     if (newHeight >= oldHeight) {
+-        QTableView::resizeEvent(event);
++        // XDJ: route through WLibraryTableView so visible-rows zoom and the
++        // fixed column layout track the new viewport size.
++        WLibraryTableView::resizeEvent(event);
++        applyFixedColumnWidths();
+         return;
+     }
+ 
+@@ -1170,7 +1239,8 @@ void WTrackTableView::resizeEvent(QResizeEvent* event) {
+     int rHeight = rowHeight(currRow);
+ 
+     if (currRow < 0 || rHeight == 0) { // true if currIndex is invalid
+-        QTableView::resizeEvent(event);
++        WLibraryTableView::resizeEvent(event);
++        applyFixedColumnWidths();
+         return;
+     }
+ 
+@@ -1180,7 +1250,8 @@ void WTrackTableView::resizeEvent(QResizeEvent* event) {
+     // Note: don't use viewport()->height() because that may already have changed
+     bool rowWasVisible = posInView > 0 && posInView - rHeight < oldHeight;
+ 
+-    QTableView::resizeEvent(event);
++    WLibraryTableView::resizeEvent(event);
++    applyFixedColumnWidths();
+ 
+     if (!rowWasVisible) {
+         return;
 --- a/src/library/trackmodel.h
 +++ b/src/library/trackmodel.h
-@@ -225,6 +225,12 @@ class TrackModel {
+@@ -225,6 +225,19 @@ class TrackModel {
          m_eDefaultSortOrder = sortOrder;
      }
  
@@ -392,22 +512,30 @@ Forwarded: no
 +        return false;
 +    }
 +
++    /// XDJ: when true the view lays the visible columns out as
++    /// #, Title, Artist, Key, Duration with proportional widths that fill
++    /// the viewport (see WTrackTableView::applyFixedColumnWidths).
++    virtual bool fixedColumnLayout() const {
++        return false;
++    }
++
      virtual bool isColumnSortable(int column) const {
          Q_UNUSED(column);
          return true;
 --- a/src/library/rekordbox/rekordboxfeature.h
 +++ b/src/library/rekordbox/rekordboxfeature.h
-@@ -48,6 +48,7 @@ class RekordboxPlaylistModel : public BaseExternalPlaylistModel {
+@@ -48,6 +48,8 @@ class RekordboxPlaylistModel : public BaseExternalPlaylistModel {
      TrackPointer getTrack(const QModelIndex& index) const override;
      bool isColumnHiddenByDefault(int column) override;
      bool isColumnInternal(int column) override;
 +    bool forceDefaultSort() const override;
++    bool fixedColumnLayout() const override;
  
    protected:
      void initSortColumnMapping() override;
 --- a/src/library/rekordbox/rekordboxfeature.cpp
 +++ b/src/library/rekordbox/rekordboxfeature.cpp
-@@ -1303,15 +1303,27 @@ TrackPointer RekordboxPlaylistModel::getTrack(const QModelIndex& index) const {
+@@ -1303,15 +1303,31 @@ TrackPointer RekordboxPlaylistModel::getTrack(const QModelIndex& index) const {
  }
  
  bool RekordboxPlaylistModel::isColumnHiddenByDefault(int column) {
@@ -437,6 +565,10 @@ Forwarded: no
 +bool RekordboxPlaylistModel::forceDefaultSort() const {
 +    // XDJ: always come up sorted by # (playlist position) ascending,
 +    // regardless of any saved header sort state.
++    return true;
++}
++
++bool RekordboxPlaylistModel::fixedColumnLayout() const {
 +    return true;
  }
  

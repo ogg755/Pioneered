@@ -11,7 +11,7 @@
           <WidgetGroup>
             <ObjectName>PlaylistPane</ObjectName>
             <Layout>vertical</Layout>
-            <Size>340f,0me</Size>
+            <Size>200f,0me</Size>
             <Children>
               <WidgetGroup>
                 <ObjectName>UsbButtonRow</ObjectName>
