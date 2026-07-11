@@ -1,0 +1,445 @@
+Description: XDJ hardware/behavior tweaks (bar markers, controller reconnect, tempo sync)
+ 1. Rekordbox-style bar markers: small red triangles at the top and bottom
+    of the scrolling waveform on the first beat of each bar (both the
+    QPainter and the allshader/QOpenGL beat renderers). The rekordbox ANLZ
+    importer now anchors the beat grid on the first beat numbered "1"
+    (rekordbox numbers beats 1-4 within a bar; Mixxx previously discarded
+    this and could anchor mid-bar).
+ 2. Controller auto-reconnect: PortMidi controllers count consecutive
+    read/write errors and report themselves disconnected; a 5 s watchdog in
+    ControllerManager reopens enabled controllers that died or were
+    (re)plugged, using the same rescan path as the preferences dialog.
+    A controller that is enabled in the preferences but unplugged causes a
+    periodic rescan until it returns; disable it in the preferences to stop.
+ 3. Pioneer DDJ-400 mapping: on track load the deck's tempo jumps to the
+    physical tempo fader position (cached from fader movements and the
+    startup position query SysEx), applied 200 ms after load to let Mixxx's
+    own speed/pitch reset run first. Soft takeover then resumes with the
+    internal value matching the fader, eliminating the dead slider until it
+    crossed its old position.
+Author: Pioneered CI <pioneered-build@localhost>
+Forwarded: no
+
+--- a/src/library/rekordbox/rekordboxfeature.cpp
++++ b/src/library/rekordbox/rekordboxfeature.cpp
+@@ -914,7 +914,24 @@ void readAnalyze(TrackPointer track,
+ 
+             QVector<mixxx::audio::FramePos> beats;
+ 
+-            for (const auto& beat : *beatGridTag->beats()) {
++            // XDJ: anchor the grid on the first downbeat so bar phase is
++            // known. Rekordbox numbers every beat 1-4 within its bar, but
++            // Mixxx has no bar concept: the waveform bar markers assume the
++            // first beat marker is a "1" and count every 4th beat from it.
++            const auto& gridBeats = *beatGridTag->beats();
++            std::size_t firstDownbeatIdx = 0;
++            for (std::size_t i = 0; i < gridBeats.size(); ++i) {
++                if (gridBeats.at(i)->beat_number() == 1) {
++                    firstDownbeatIdx = i;
++                    break;
++                }
++            }
++
++            std::size_t beatIdx = 0;
++            for (const auto& beat : gridBeats) {
++                if (beatIdx++ < firstDownbeatIdx) {
++                    continue;
++                }
+                 int time = static_cast<int>(beat->time()) - timingOffset;
+                 // Ensure no offset times are less than 1
+                 if (time < 1) {
+--- a/src/waveform/renderers/waveformrenderbeat.cpp
++++ b/src/waveform/renderers/waveformrenderbeat.cpp
+@@ -2,6 +2,8 @@
+ 
+ #include <QPainter>
+ 
++#include <utility>
++
+ #include "track/track.h"
+ #include "util/painterscope.h"
+ #include "waveform/renderers/waveformwidgetrenderer.h"
+@@ -88,6 +90,12 @@ void WaveformRenderBeat::draw(QPainter* painter, QPaintEvent* /*event*/) {
+ 
+     int beatCount = 0;
+ 
++    // XDJ: rekordbox-style bar markers. The first beat marker is anchored on
++    // a downbeat by the rekordbox importer, so every 4th beat from it starts
++    // a bar.
++    const auto firstMarker = trackBeats->cfirstmarker();
++    QVector<float> downbeatXs;
++
+     for (; it != trackBeats->cend() && *it <= endPosition; ++it) {
+         double beatPosition = it->toEngineSamplePos();
+         double xBeatPoint =
+@@ -101,6 +109,10 @@ void WaveformRenderBeat::draw(QPainter* painter, QPaintEvent* /*event*/) {
+         }
+ 
+         if (orientation == Qt::Horizontal) {
++            const int beatIndexFromMarker = it - firstMarker;
++            if (((beatIndexFromMarker % 4) + 4) % 4 == 0) {
++                downbeatXs.append(static_cast<float>(xBeatPoint));
++            }
+             m_beats[beatCount++].setLine(xBeatPoint, 0.0f, xBeatPoint, rendererHeight);
+         } else {
+             m_beats[beatCount++].setLine(0.0f, xBeatPoint, rendererWidth, xBeatPoint);
+@@ -109,4 +121,27 @@ void WaveformRenderBeat::draw(QPainter* painter, QPaintEvent* /*event*/) {
+ 
+     // Make sure to use constData to prevent detaches!
+     painter->drawLines(m_beats.constData(), beatCount);
++
++    // XDJ: draw small red triangles at the top and bottom of the waveform on
++    // the first beat of each bar, like rekordbox/CDJ beatgrids.
++    if (!downbeatXs.isEmpty()) {
++        const float markerSize = std::max(4.0f, rendererHeight * 0.07f);
++        const QColor barMarkerColor(0xE7, 0x1E, 0x27); // Pioneer red
++        painter->setPen(Qt::NoPen);
++        painter->setBrush(barMarkerColor);
++        for (const float x : std::as_const(downbeatXs)) {
++            const QPointF top[3] = {
++                    QPointF(x - markerSize, 0.0f),
++                    QPointF(x + markerSize, 0.0f),
++                    QPointF(x, markerSize),
++            };
++            const QPointF bottom[3] = {
++                    QPointF(x - markerSize, rendererHeight),
++                    QPointF(x + markerSize, rendererHeight),
++                    QPointF(x, rendererHeight - markerSize),
++            };
++            painter->drawPolygon(top, 3);
++            painter->drawPolygon(bottom, 3);
++        }
++    }
+ }
+--- a/src/waveform/renderers/allshader/waveformrenderbeat.h
++++ b/src/waveform/renderers/allshader/waveformrenderbeat.h
+@@ -28,6 +28,8 @@ class allshader::WaveformRenderBeat final : public allshader::WaveformRenderer {
+     mixxx::UnicolorShader m_shader;
+     QColor m_color;
+     VertexData m_vertices;
++    // XDJ: red bar-start triangles (rekordbox-style downbeat markers).
++    VertexData m_downbeatVertices;
+ 
+     bool m_isSlipRenderer;
+ 
+--- a/src/waveform/renderers/allshader/waveformrenderbeat.cpp
++++ b/src/waveform/renderers/allshader/waveformrenderbeat.cpp
+@@ -2,6 +2,8 @@
+ 
+ #include <QDomNode>
+ 
++#include <algorithm>
++
+ #include "skin/legacy/skincontext.h"
+ #include "track/track.h"
+ #include "waveform/renderers/allshader/matrixforwidgetgeometry.h"
+@@ -91,6 +93,14 @@ void WaveformRenderBeat::paintGL() {
+     m_vertices.clear();
+     m_vertices.reserve(reserved);
+ 
++    // XDJ: rekordbox-style bar markers — red triangles at the top and bottom
++    // of the waveform on the first beat of each bar. The rekordbox importer
++    // anchors the first beat marker on a downbeat, so every 4th beat from it
++    // starts a bar.
++    const auto firstMarker = trackBeats->cfirstmarker();
++    const float markerSize = std::max(4.f, rendererBreadth * 0.07f);
++    m_downbeatVertices.clear();
++
+     for (auto it = trackBeats->iteratorFrom(startPosition);
+             it != trackBeats->cend() && *it <= endPosition;
+             ++it) {
+@@ -108,6 +118,20 @@ void WaveformRenderBeat::paintGL() {
+                 0.f,
+                 x2,
+                 m_isSlipRenderer ? rendererBreadth / 2 : rendererBreadth);
++
++        if (!m_isSlipRenderer) {
++            const int beatIndexFromMarker = it - firstMarker;
++            if (((beatIndexFromMarker % 4) + 4) % 4 == 0) {
++                m_downbeatVertices.addTriangle(
++                        {x1 - markerSize, 0.f},
++                        {x1 + markerSize, 0.f},
++                        {x1, markerSize});
++                m_downbeatVertices.addTriangle(
++                        {x1 - markerSize, rendererBreadth},
++                        {x1 + markerSize, rendererBreadth},
++                        {x1, rendererBreadth - markerSize});
++            }
++        }
+     }
+ 
+     DEBUG_ASSERT(reserved == m_vertices.size());
+@@ -129,6 +153,16 @@ void WaveformRenderBeat::paintGL() {
+ 
+     glDrawArrays(GL_TRIANGLES, 0, m_vertices.size());
+ 
++    // XDJ: second pass for the red bar markers.
++    if (m_downbeatVertices.size() > 0) {
++        QColor barMarkerColor(0xE7, 0x1E, 0x27); // Pioneer red
++        barMarkerColor.setAlphaF(alpha / 100.0f);
++        m_shader.setAttributeArray(
++                positionLocation, GL_FLOAT, m_downbeatVertices.constData(), 2);
++        m_shader.setUniformValue(colorLocation, barMarkerColor);
++        glDrawArrays(GL_TRIANGLES, 0, m_downbeatVertices.size());
++    }
++
+     m_shader.disableAttributeArray(positionLocation);
+     m_shader.release();
+ }
+--- a/src/controllers/controller.h
++++ b/src/controllers/controller.h
+@@ -55,6 +55,13 @@ class Controller : public QObject {
+ 
+     virtual bool matchMapping(const MappingInfo& mapping) = 0;
+ 
++    /// XDJ: true when the controller looks physically disconnected (e.g. a
++    /// run of consecutive I/O errors). Used by the ControllerManager
++    /// reconnect watchdog.
++    virtual bool seemsDisconnected() const {
++        return false;
++    }
++
+   signals:
+     /// Emitted when the controller is opened or closed.
+     void openChanged(bool bOpen);
+--- a/src/controllers/midi/portmidicontroller.h
++++ b/src/controllers/midi/portmidicontroller.h
+@@ -2,6 +2,7 @@
+ 
+ #include <portmidi.h>
+ 
++#include <QAtomicInt>
+ #include <QScopedPointer>
+ 
+ #include "controllers/midi/midicontroller.h"
+@@ -55,6 +56,11 @@ class PortMidiController : public MidiController {
+             int outputDeviceIndex);
+     ~PortMidiController() override;
+ 
++    /// XDJ: consecutive read/write errors suggest the USB device is gone.
++    bool seemsDisconnected() const override {
++        return m_consecutiveErrors.loadRelaxed() >= kDisconnectErrorThreshold;
++    }
++
+   private slots:
+     int open() override;
+     int close() override;
+@@ -92,5 +98,9 @@ class PortMidiController : public MidiController {
+     int m_cReceiveMsg_index;
+     bool m_bInSysex;
+ 
++    // XDJ: disconnect detection for the reconnect watchdog.
++    static constexpr int kDisconnectErrorThreshold = 8;
++    QAtomicInt m_consecutiveErrors;
++
+     friend class PortMidiControllerTest;
+ };
+--- a/src/controllers/midi/portmidicontroller.cpp
++++ b/src/controllers/midi/portmidicontroller.cpp
+@@ -127,8 +127,12 @@ bool PortMidiController::poll() {
+ 
+     if (numEvents < 0) {
+         qCWarning(m_logInput) << "PortMidi error:" << Pm_GetErrorText((PmError)numEvents);
++        // XDJ: a run of read errors means the USB device is probably gone;
++        // the ControllerManager watchdog will reconnect us.
++        m_consecutiveErrors.ref();
+         return false;
+     }
++    m_consecutiveErrors.storeRelaxed(0);
+ 
+     for (int i = 0; i < numEvents; i++) {
+         unsigned char status = Pm_MessageStatus(m_midiBuffer[i].message);
+@@ -202,6 +206,7 @@ void PortMidiController::sendShortMsg(unsigned char status, unsigned char byte1,
+ 
+     PmError err = m_pOutputDevice->writeShort(word);
+     if (err == pmNoError) {
++        m_consecutiveErrors.storeRelaxed(0);
+         qCDebug(m_logOutput) << QStringLiteral("outgoing: ")
+                              << MidiUtils::formatMidiOpCode(getName(),
+                                         status,
+@@ -210,6 +215,7 @@ void PortMidiController::sendShortMsg(unsigned char status, unsigned char byte1,
+                                         MidiUtils::channelFromStatus(status),
+                                         MidiUtils::opCodeFromStatus(status));
+     } else {
++        m_consecutiveErrors.ref();
+         // Use two qWarnings() to ensure line break works on all operating systems
+         qCWarning(m_logOutput) << "Error sending short message"
+                                << MidiUtils::formatMidiOpCode(getName(),
+--- a/src/controllers/controllermanager.h
++++ b/src/controllers/controllermanager.h
+@@ -64,6 +64,9 @@ class ControllerManager : public QObject {
+     /// Perform initialization that should be delayed until the ControllerManager
+     /// thread is started.
+     void slotInitialize();
++    /// XDJ reconnect watchdog: reopen enabled controllers that died or were
++    /// (re)plugged, without requiring a manual rescan in the preferences.
++    void slotCheckDisconnectedDevices();
+     /// Open whatever controllers are selected in the preferences. This currently
+     /// only runs on start-up but maybe should instead be signaled by the
+     /// preferences dialog on apply, and only open/close changed devices
+@@ -79,6 +82,7 @@ class ControllerManager : public QObject {
+     UserSettingsPointer m_pConfig;
+     ControllerLearningEventFilter* m_pControllerLearningEventFilter;
+     QTimer m_pollTimer;
++    QTimer m_reconnectTimer;
+     mutable QMutex m_mutex;
+     QList<ControllerEnumerator*> m_enumerators;
+     QList<Controller*> m_controllers;
+--- a/src/controllers/controllermanager.cpp
++++ b/src/controllers/controllermanager.cpp
+@@ -93,6 +93,7 @@ ControllerManager::ControllerManager(UserSettingsPointer pConfig)
+           // its own event loop.
+           m_pControllerLearningEventFilter(new ControllerLearningEventFilter()),
+           m_pollTimer(this),
++          m_reconnectTimer(this),
+           m_skipPoll(false) {
+     qRegisterMetaType<std::shared_ptr<LegacyControllerMapping>>(
+             "std::shared_ptr<LegacyControllerMapping>");
+@@ -107,6 +108,13 @@ ControllerManager::ControllerManager(UserSettingsPointer pConfig)
+     m_pollTimer.setInterval(kPollInterval.toIntegerMillis());
+     connect(&m_pollTimer, &QTimer::timeout, this, &ControllerManager::pollDevices);
+ 
++    // XDJ reconnect watchdog (see slotCheckDisconnectedDevices).
++    m_reconnectTimer.setInterval(5000);
++    connect(&m_reconnectTimer,
++            &QTimer::timeout,
++            this,
++            &ControllerManager::slotCheckDisconnectedDevices);
++
+     m_pThread = new QThread;
+     m_pThread->setObjectName("Controller");
+ 
+@@ -164,9 +172,13 @@ void ControllerManager::slotInitialize() {
+ #ifdef __HID__
+     m_enumerators.append(new HidEnumerator());
+ #endif
++
++    // XDJ: start the reconnect watchdog once the enumerators exist.
++    m_reconnectTimer.start();
+ }
+ 
+ void ControllerManager::slotShutdown() {
++    m_reconnectTimer.stop();
+     stopPolling();
+ 
+     // Clear m_enumerators before deleting the enumerators to prevent other code
+@@ -306,6 +318,55 @@ void ControllerManager::slotSetUpDevices() {
+     pollIfAnyControllersOpen();
+ }
+ 
++void ControllerManager::slotCheckDisconnectedDevices() {
++    // XDJ reconnect watchdog. Two triggers:
++    //  1. An open controller reports a run of I/O errors (USB unplugged or
++    //     power-cycled) -> rescan and reopen.
++    //  2. A device that is enabled in the config is not present/open (plugged
++    //     in after startup, or replugged after 1 closed it) -> rescan until
++    //     it comes back. Disable the controller in the preferences to stop
++    //     the periodic rescan.
++    auto locker = lockMutex(&m_mutex);
++    if (m_enumerators.isEmpty()) {
++        return;
++    }
++    const QList<Controller*> controllers = m_controllers;
++    locker.unlock();
++
++    bool needSetup = false;
++    QSet<QString> openDevices;
++    for (Controller* pController : controllers) {
++        if (pController->isOpen()) {
++            if (pController->seemsDisconnected()) {
++                qWarning() << "Controller" << pController->getName()
++                           << "seems disconnected, reconnecting";
++                needSetup = true;
++            } else {
++                openDevices.insert(sanitizeDeviceName(pController->getName()));
++            }
++        }
++    }
++
++    if (!needSetup) {
++        const QList<ConfigKey> controllerKeys =
++                m_pConfig->getKeysWithGroup(QStringLiteral("[Controller]"));
++        for (const ConfigKey& key : controllerKeys) {
++            if (m_pConfig->getValue(key, 0) &&
++                    !getConfiguredMappingFileForDevice(key.item).isEmpty() &&
++                    !openDevices.contains(key.item)) {
++                qDebug() << "Enabled controller" << key.item
++                         << "not open, rescanning";
++                needSetup = true;
++                break;
++            }
++        }
++    }
++
++    if (needSetup) {
++        slotSetUpDevices();
++    }
++}
++
+ void ControllerManager::pollIfAnyControllersOpen() {
+     auto locker = lockMutex(&m_mutex);
+     QList<Controller*> controllers = m_controllers;
+--- a/res/controllers/Pioneer-DDJ-400-script.js
++++ b/res/controllers/Pioneer-DDJ-400-script.js
+@@ -140,6 +140,32 @@ PioneerDDJ400.highResMSB = {
+     "[Channel2]": {}
+ };
+ 
++// XDJ: last physical tempo fader position per deck (as a Mixxx "rate"
++// value). Populated by the startup position query SysEx reply and by every
++// fader movement; applied to the deck when a new track is loaded.
++PioneerDDJ400.lastTempoSliderValue = {
++    "[Channel1]": null,
++    "[Channel2]": null
++};
++
++PioneerDDJ400.tempoSliderSyncOnLoad = function(value, group) {
++    if (value !== 1) {
++        return;
++    }
++    // Wait out Mixxx's own speed/pitch reset on track load (it runs on the
++    // main thread shortly after track_loaded flips), then jump the tempo to
++    // the physical fader position. Soft takeover resumes afterwards with the
++    // internal value matching the fader, so there is no dead zone.
++    engine.beginTimer(200, function() {
++        const rate = PioneerDDJ400.lastTempoSliderValue[group];
++        if (rate === null) {
++            return;
++        }
++        engine.softTakeoverIgnoreNextValue(group, "rate");
++        engine.setValue(group, "rate", rate);
++    }, true);
++};
++
+ PioneerDDJ400.trackLoadedLED = function(value, group, _control) {
+     midi.sendShortMsg(
+         0x9F,
+@@ -183,6 +209,10 @@ PioneerDDJ400.init = function() {
+     engine.makeConnection("[Channel1]", "track_loaded", PioneerDDJ400.trackLoadedLED);
+     engine.makeConnection("[Channel2]", "track_loaded", PioneerDDJ400.trackLoadedLED);
+ 
++    // XDJ: jump the tempo to the physical fader position on track load.
++    engine.makeConnection("[Channel1]", "track_loaded", PioneerDDJ400.tempoSliderSyncOnLoad);
++    engine.makeConnection("[Channel2]", "track_loaded", PioneerDDJ400.tempoSliderSyncOnLoad);
++
+     // play the "track loaded" animation on both decks at startup
+     midi.sendShortMsg(0x9F, 0x00, 0x7F);
+     midi.sendShortMsg(0x9F, 0x01, 0x7F);
+@@ -532,12 +562,12 @@ PioneerDDJ400.tempoSliderMSB = function(channel, control, value, status, group)
+ 
+ PioneerDDJ400.tempoSliderLSB = function(channel, control, value, status, group) {
+     const fullValue = (PioneerDDJ400.highResMSB[group].tempoSlider << 7) + value;
++    const rate = 1 - (fullValue / 0x2000);
+ 
+-    engine.setValue(
+-        group,
+-        "rate",
+-        1 - (fullValue / 0x2000)
+-    );
++    // XDJ: remember the physical fader position for tempoSliderSyncOnLoad.
++    PioneerDDJ400.lastTempoSliderValue[group] = rate;
++
++    engine.setValue(group, "rate", rate);
+ };
+ 
+ //

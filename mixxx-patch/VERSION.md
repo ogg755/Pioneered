@@ -28,4 +28,11 @@
    open sorted by # ascending, Pioneer-style key traffic light vs the master
    deck (master = playing deck that started most recently; green = Camelot
    compatible; keys shown as note names), fixed rekordbox column set
-   (#, Title, Artist, Key, Duration).
+   (#, Title, Artist, Key, Duration) with proportional widths filling the
+   viewport (r13).
+5. `xdj-hardware.patch` (added 2026-07-11, r14) — rekordbox-style red bar
+   markers on the waveform beatgrid (importer anchors the grid on the first
+   beat numbered "1"); controller auto-reconnect watchdog (PortMidi error
+   counting + 5 s rescan/reopen of enabled devices, incl. plug-in after
+   startup); DDJ-400 mapping jumps deck tempo to the physical fader position
+   on track load (200 ms after load, then soft takeover resumes).
