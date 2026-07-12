@@ -36,3 +36,11 @@
    counting + 5 s rescan/reopen of enabled devices, incl. plug-in after
    startup); DDJ-400 mapping jumps deck tempo to the physical fader position
    on track load (200 ms after load, then soft takeover resumes).
+6. `search-osk.patch` (added 2026-07-12) — track Search tab replacing the
+   Sampler tab. Adds `WSearchLineEdit::slotSetSearchText()` (sets text and
+   re-runs the search, which `slotRestoreSearch()` does not) and
+   `[Library],search_key_a..z` / `search_key_0..9` / `search_space` /
+   `search_backspace` push controls, so the skin's on-screen QWERTY keyboard
+   drives the native search box over the selected folder. Clearing reuses the
+   existing `[Library],clear_search`. Touches `src/widget/wsearchlineedit.{h,cpp}`
+   and `src/library/librarycontrol.{h,cpp}`.
