@@ -1,0 +1,16 @@
+<Template>
+  <PushButton>
+    <ObjectName>KbKey</ObjectName>
+    <SizePolicy>me,me</SizePolicy>
+    <NumberStates>1</NumberStates>
+    <State>
+      <Number>0</Number>
+      <Text><Variable name="key_label"/></Text>
+    </State>
+    <Connection>
+      <ConfigKey persist="false">[Library],search_key_<Variable name="key_char"/></ConfigKey>
+      <EmitOnPressAndRelease>true</EmitOnPressAndRelease>
+      <ButtonState>LeftButton</ButtonState>
+    </Connection>
+  </PushButton>
+</Template>

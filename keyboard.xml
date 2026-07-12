@@ -1,0 +1,97 @@
+<Template>
+  <WidgetGroup>
+    <ObjectName>Keyboard</ObjectName>
+    <Layout>vertical</Layout>
+    <SizePolicy>me,me</SizePolicy>
+    <Children>
+      <WidgetGroup><ObjectName>KbRow</ObjectName><Layout>horizontal</Layout><SizePolicy>me,me</SizePolicy><Children>
+        <Template src="skin:templates/kb_key.xml"><SetVariable name="key_label">1</SetVariable><SetVariable name="key_char">1</SetVariable></Template>
+        <Template src="skin:templates/kb_key.xml"><SetVariable name="key_label">2</SetVariable><SetVariable name="key_char">2</SetVariable></Template>
+        <Template src="skin:templates/kb_key.xml"><SetVariable name="key_label">3</SetVariable><SetVariable name="key_char">3</SetVariable></Template>
+        <Template src="skin:templates/kb_key.xml"><SetVariable name="key_label">4</SetVariable><SetVariable name="key_char">4</SetVariable></Template>
+        <Template src="skin:templates/kb_key.xml"><SetVariable name="key_label">5</SetVariable><SetVariable name="key_char">5</SetVariable></Template>
+        <Template src="skin:templates/kb_key.xml"><SetVariable name="key_label">6</SetVariable><SetVariable name="key_char">6</SetVariable></Template>
+        <Template src="skin:templates/kb_key.xml"><SetVariable name="key_label">7</SetVariable><SetVariable name="key_char">7</SetVariable></Template>
+        <Template src="skin:templates/kb_key.xml"><SetVariable name="key_label">8</SetVariable><SetVariable name="key_char">8</SetVariable></Template>
+        <Template src="skin:templates/kb_key.xml"><SetVariable name="key_label">9</SetVariable><SetVariable name="key_char">9</SetVariable></Template>
+        <Template src="skin:templates/kb_key.xml"><SetVariable name="key_label">0</SetVariable><SetVariable name="key_char">0</SetVariable></Template>
+      </Children></WidgetGroup>
+      <WidgetGroup><ObjectName>KbRow</ObjectName><Layout>horizontal</Layout><SizePolicy>me,me</SizePolicy><Children>
+        <Template src="skin:templates/kb_key.xml"><SetVariable name="key_label">Q</SetVariable><SetVariable name="key_char">q</SetVariable></Template>
+        <Template src="skin:templates/kb_key.xml"><SetVariable name="key_label">W</SetVariable><SetVariable name="key_char">w</SetVariable></Template>
+        <Template src="skin:templates/kb_key.xml"><SetVariable name="key_label">E</SetVariable><SetVariable name="key_char">e</SetVariable></Template>
+        <Template src="skin:templates/kb_key.xml"><SetVariable name="key_label">R</SetVariable><SetVariable name="key_char">r</SetVariable></Template>
+        <Template src="skin:templates/kb_key.xml"><SetVariable name="key_label">T</SetVariable><SetVariable name="key_char">t</SetVariable></Template>
+        <Template src="skin:templates/kb_key.xml"><SetVariable name="key_label">Y</SetVariable><SetVariable name="key_char">y</SetVariable></Template>
+        <Template src="skin:templates/kb_key.xml"><SetVariable name="key_label">U</SetVariable><SetVariable name="key_char">u</SetVariable></Template>
+        <Template src="skin:templates/kb_key.xml"><SetVariable name="key_label">I</SetVariable><SetVariable name="key_char">i</SetVariable></Template>
+        <Template src="skin:templates/kb_key.xml"><SetVariable name="key_label">O</SetVariable><SetVariable name="key_char">o</SetVariable></Template>
+        <Template src="skin:templates/kb_key.xml"><SetVariable name="key_label">P</SetVariable><SetVariable name="key_char">p</SetVariable></Template>
+      </Children></WidgetGroup>
+      <WidgetGroup><ObjectName>KbRow</ObjectName><Layout>horizontal</Layout><SizePolicy>me,me</SizePolicy><Children>
+        <Template src="skin:templates/kb_key.xml"><SetVariable name="key_label">A</SetVariable><SetVariable name="key_char">a</SetVariable></Template>
+        <Template src="skin:templates/kb_key.xml"><SetVariable name="key_label">S</SetVariable><SetVariable name="key_char">s</SetVariable></Template>
+        <Template src="skin:templates/kb_key.xml"><SetVariable name="key_label">D</SetVariable><SetVariable name="key_char">d</SetVariable></Template>
+        <Template src="skin:templates/kb_key.xml"><SetVariable name="key_label">F</SetVariable><SetVariable name="key_char">f</SetVariable></Template>
+        <Template src="skin:templates/kb_key.xml"><SetVariable name="key_label">G</SetVariable><SetVariable name="key_char">g</SetVariable></Template>
+        <Template src="skin:templates/kb_key.xml"><SetVariable name="key_label">H</SetVariable><SetVariable name="key_char">h</SetVariable></Template>
+        <Template src="skin:templates/kb_key.xml"><SetVariable name="key_label">J</SetVariable><SetVariable name="key_char">j</SetVariable></Template>
+        <Template src="skin:templates/kb_key.xml"><SetVariable name="key_label">K</SetVariable><SetVariable name="key_char">k</SetVariable></Template>
+        <Template src="skin:templates/kb_key.xml"><SetVariable name="key_label">L</SetVariable><SetVariable name="key_char">l</SetVariable></Template>
+      </Children></WidgetGroup>
+      <WidgetGroup><ObjectName>KbRow</ObjectName><Layout>horizontal</Layout><SizePolicy>me,me</SizePolicy><Children>
+        <Template src="skin:templates/kb_key.xml"><SetVariable name="key_label">Z</SetVariable><SetVariable name="key_char">z</SetVariable></Template>
+        <Template src="skin:templates/kb_key.xml"><SetVariable name="key_label">X</SetVariable><SetVariable name="key_char">x</SetVariable></Template>
+        <Template src="skin:templates/kb_key.xml"><SetVariable name="key_label">C</SetVariable><SetVariable name="key_char">c</SetVariable></Template>
+        <Template src="skin:templates/kb_key.xml"><SetVariable name="key_label">V</SetVariable><SetVariable name="key_char">v</SetVariable></Template>
+        <Template src="skin:templates/kb_key.xml"><SetVariable name="key_label">B</SetVariable><SetVariable name="key_char">b</SetVariable></Template>
+        <Template src="skin:templates/kb_key.xml"><SetVariable name="key_label">N</SetVariable><SetVariable name="key_char">n</SetVariable></Template>
+        <Template src="skin:templates/kb_key.xml"><SetVariable name="key_label">M</SetVariable><SetVariable name="key_char">m</SetVariable></Template>
+        <PushButton>
+          <ObjectName>KbBackspace</ObjectName>
+          <SizePolicy>me,me</SizePolicy>
+          <NumberStates>1</NumberStates>
+          <State><Number>0</Number><Text>&#9003;</Text></State>
+          <Connection>
+            <ConfigKey persist="false">[Library],search_backspace</ConfigKey>
+            <EmitOnPressAndRelease>true</EmitOnPressAndRelease>
+            <ButtonState>LeftButton</ButtonState>
+          </Connection>
+        </PushButton>
+        <PushButton>
+          <ObjectName>KbSpace</ObjectName>
+          <SizePolicy>me,me</SizePolicy>
+          <NumberStates>1</NumberStates>
+          <State><Number>0</Number><Text>space</Text></State>
+          <Connection>
+            <ConfigKey persist="false">[Library],search_space</ConfigKey>
+            <EmitOnPressAndRelease>true</EmitOnPressAndRelease>
+            <ButtonState>LeftButton</ButtonState>
+          </Connection>
+        </PushButton>
+        <PushButton>
+          <ObjectName>KbClear</ObjectName>
+          <SizePolicy>me,me</SizePolicy>
+          <NumberStates>1</NumberStates>
+          <State><Number>0</Number><Text>clear</Text></State>
+          <Connection>
+            <ConfigKey persist="false">[Library],clear_search</ConfigKey>
+            <EmitOnPressAndRelease>true</EmitOnPressAndRelease>
+            <ButtonState>LeftButton</ButtonState>
+          </Connection>
+        </PushButton>
+        <PushButton>
+          <ObjectName>KbDone</ObjectName>
+          <SizePolicy>me,me</SizePolicy>
+          <NumberStates>2</NumberStates>
+          <State><Number>0</Number><Text>Done</Text></State>
+          <State><Number>1</Number><Text>Done</Text></State>
+          <Connection>
+            <ConfigKey persist="false">[Skin],show_keyboard</ConfigKey>
+            <ButtonState>LeftButton</ButtonState>
+          </Connection>
+        </PushButton>
+      </Children></WidgetGroup>
+    </Children>
+  </WidgetGroup>
+</Template>
