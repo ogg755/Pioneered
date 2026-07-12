@@ -31,9 +31,10 @@ Two deliverables, mirroring the established skin + patch-via-CI pattern.
 
 ### B. Mixxx patch (`mixxx-patch/search-osk.patch`, 6th in CI order)
 
-- `LibraryControl` already owns `m_pSearchbox` (a `WSearchLineEdit*`, bound automatically by `LibraryControl::bindSearchboxWidget()` when the skin contains a `<SearchBox>`). `WSearchLineEdit` exposes `QString getSearchText() const` and `void slotRestoreSearch(const QString& text)` (sets text **and** triggers the search).
+- `LibraryControl` already owns `m_pSearchbox` (a `WSearchLineEdit*`, bound automatically by `LibraryControl::bindSearchboxWidget()` when the skin contains a `<SearchBox>`). `WSearchLineEdit` exposes `QString getSearchText() const` (returns empty when the box is disabled/empty — never the placeholder).
+- Add a new public slot `WSearchLineEdit::slotSetSearchText(const QString&)` that enables the box, sets the text via the existing `updateEditBox()`, and schedules the live search (`triggerSearchDebounced()` + `m_saveTimer`), mirroring what `slotTextChanged()` does for typed input. This is needed because the existing `slotRestoreSearch()` blocks signals in `updateEditBox()` and therefore does **not** re-run the search — so a keyboard built on it would set text without filtering the list. The patch therefore touches two Mixxx files: `wsearchlineedit.{h,cpp}` and `librarycontrol.{h,cpp}`.
 - Add `[Library]` `ControlPushButton`s, one per typed character: `search_key_a` … `search_key_z` and `search_key_0` … `search_key_9`, plus `search_space` and `search_backspace`.
-- Each key handler: read `m_pSearchbox->getSearchText()`, append the mapped character (or `" "` for space, or chop the last character for backspace), call `m_pSearchbox->slotRestoreSearch(newText)`.
+- Each key handler: read `m_pSearchbox->getSearchText()`, append the mapped character (or `" "` for space, or chop the last character for backspace), call `m_pSearchbox->slotSetSearchText(newText)`.
 - **Clear** reuses the existing `[Library],clear_search` control — no new control needed.
 - Register the character controls via a loop over a character list (~15 lines) rather than 38 hand-written blocks. Guard every handler with `VERIFY_OR_DEBUG_ASSERT(m_pSearchbox)`, matching the existing search-history handlers.
 
@@ -71,7 +72,7 @@ Two deliverables, mirroring the established skin + patch-via-CI pattern.
 ## Architecture / files expected to change
 
 - **Skin (Pioneered repo):** `topbar.xml`, `skin.xml`, new `search.xml`, new `keyboard.xml`, `style.qss`. Optional removal of `samplers.xml` / `sampler.xml` and the samplers singleton if unreferenced.
-- **Mixxx source (`mixxx-src/mixxx-2.5.0`):** `src/library/librarycontrol.cpp` and `src/library/librarycontrol.h` — new key controls and their handlers, stored in a container member (e.g. `std::vector<std::unique_ptr<ControlPushButton>>`) plus dedicated space/backspace members.
+- **Mixxx source (`mixxx-src/mixxx-2.5.0`):** `src/widget/wsearchlineedit.{h,cpp}` — new public slot `slotSetSearchText()`; `src/library/librarycontrol.{h,cpp}` — new key controls and their handlers, stored in a container member (`std::vector<std::unique_ptr<ControlPushButton>>`) plus dedicated space/backspace members.
 - **Patch generation:** same baseline-snapshot workflow as the existing patches — snapshot the to-be-edited files to a baseline dir, edit the canonical tree, `git diff --no-index` with `a/`,`b/` path rewrite, verify with `patch -p1` dry-run against the baseline copy. Source tree is LF; normalise CRLF before local `git apply`.
 - **CI:** append `search-osk.patch` to the patch list in `.github/workflows/build-mixxx-deb.yml` (order: usb-browse → pdb-corruption-hardening → xdj-behavior → library-ui → xdj-hardware → **search-osk**) and record it in `mixxx-patch/VERSION.md`. Version auto-bumps `+usbbrowse.r<N>` as usual.
 
