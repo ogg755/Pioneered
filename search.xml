@@ -1,0 +1,56 @@
+<Template>
+  <WidgetGroup>
+    <ObjectName>SearchPage</ObjectName>
+    <Layout>vertical</Layout>
+    <SizePolicy>me,me</SizePolicy>
+    <Children>
+      <WidgetGroup>
+        <ObjectName>SearchFieldRow</ObjectName>
+        <Layout>horizontal</Layout>
+        <Size>0me,40f</Size>
+        <Children>
+          <PushButton>
+            <ObjectName>KbShow</ObjectName>
+            <Size>44f,0me</Size>
+            <NumberStates>2</NumberStates>
+            <State><Number>0</Number><Text>&#9000;</Text></State>
+            <State><Number>1</Number><Text>&#9000;</Text></State>
+            <Connection>
+              <ConfigKey persist="false">[Skin],show_keyboard</ConfigKey>
+              <ButtonState>LeftButton</ButtonState>
+            </Connection>
+          </PushButton>
+          <SearchBox></SearchBox>
+        </Children>
+      </WidgetGroup>
+      <SingletonContainer>
+        <ObjectName>LibraryTable_Singleton</ObjectName>
+      </SingletonContainer>
+      <WidgetGroup>
+        <ObjectName>SearchLoadRow</ObjectName>
+        <Layout>horizontal</Layout>
+        <Size>0me,44f</Size>
+        <Children>
+          <Template src="skin:templates/load_button.xml">
+            <SetVariable name="channel">1</SetVariable>
+          </Template>
+          <Template src="skin:templates/load_button.xml">
+            <SetVariable name="channel">2</SetVariable>
+          </Template>
+        </Children>
+      </WidgetGroup>
+      <WidgetGroup>
+        <ObjectName>KeyboardWrap</ObjectName>
+        <Layout>vertical</Layout>
+        <Size>0me,160f</Size>
+        <Children>
+          <Template src="skin:keyboard.xml"/>
+        </Children>
+        <Connection>
+          <ConfigKey persist="false">[Skin],show_keyboard</ConfigKey>
+          <BindProperty>visible</BindProperty>
+        </Connection>
+      </WidgetGroup>
+    </Children>
+  </WidgetGroup>
+</Template>
