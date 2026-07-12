@@ -18,8 +18,8 @@
             <SetVariable name="config_key">library</SetVariable>
           </Template>
           <Template src="skin:tab.xml">
-            <SetVariable name="tab_name">Sampler</SetVariable>
-            <SetVariable name="config_key">samplers</SetVariable>
+            <SetVariable name="tab_name">Search</SetVariable>
+            <SetVariable name="config_key">search</SetVariable>
           </Template>
         </Children>
       </WidgetGroup>

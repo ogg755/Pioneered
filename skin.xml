@@ -15,6 +15,7 @@
 			<attribute persist="true" config_key="[VinylControl],show_vinylcontrol">0</attribute>
 			<attribute persist="true" config_key="[PreviewDeck],show_previewdeck">0</attribute>
 			<attribute persist="true" config_key="[Library],show_coverart">0</attribute>
+			<attribute persist="false" config_key="[Skin],show_keyboard">1</attribute>
 		</attributes>
 	</manifest>
 
@@ -66,9 +67,9 @@
 			</Children>
 		</SingletonDefinition>
 		<SingletonDefinition>
-			<ObjectName>Samplers_Singleton</ObjectName>
+			<ObjectName>Search_Singleton</ObjectName>
 			<Children>
-				<Template src="skin:samplers.xml"/>
+				<Template src="skin:search.xml"/>
 			</Children>
 		</SingletonDefinition>
 
@@ -92,8 +93,8 @@
 								<SingletonContainer trigger="[Tab],library" on_hide_select="0">
 									<ObjectName>Library_Singleton</ObjectName>
 								</SingletonContainer>
-								<SingletonContainer trigger="[Tab],samplers" on_hide_select="0">
-									<ObjectName>Samplers_Singleton</ObjectName>
+								<SingletonContainer trigger="[Tab],search" on_hide_select="0">
+									<ObjectName>Search_Singleton</ObjectName>
 								</SingletonContainer>
 							</Children>
 						</WidgetStack>
