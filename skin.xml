@@ -54,6 +54,12 @@
 			</Children>
 		</SingletonDefinition>
 		<SingletonDefinition>
+			<ObjectName>LibraryTable_Singleton</ObjectName>
+			<Children>
+				<Template src="skin:library_table.xml"/>
+			</Children>
+		</SingletonDefinition>
+		<SingletonDefinition>
 			<ObjectName>Library_Singleton</ObjectName>
 			<Children>
 				<Template src="skin:library.xml"/>

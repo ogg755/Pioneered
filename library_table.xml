@@ -1,0 +1,9 @@
+<Template>
+  <Library>
+    <ObjectName>Library</ObjectName>
+    <SizePolicy>me,me</SizePolicy>
+    <BgColor>#000</BgColor>
+    <FgColor>#75001a</FgColor>
+    <TrackTableBackgroundColorOpacity>0.4</TrackTableBackgroundColorOpacity>
+  </Library>
+</Template>
