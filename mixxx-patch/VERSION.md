@@ -44,3 +44,10 @@
    drives the native search box over the selected folder. Clearing reuses the
    existing `[Library],clear_search`. Touches `src/widget/wsearchlineedit.{h,cpp}`
    and `src/library/librarycontrol.{h,cpp}`.
+7. `usb-force-eject.patch` (added 2026-07-12) — two-tier USB hold: at 5s a
+   locked stick shows the explanatory banner and the hold continues; at 10s
+   playing decks on that stick are stopped and the eject runs regardless.
+   Also adds `[Library],load_blocked`, set by WTrackTableView when a load is
+   silently rejected because the target deck is playing (skin shows
+   "PAUSE DECK TO LOAD"). Touches `src/library/librarycontrol.{h,cpp}`,
+   `src/widget/wtracktableview.cpp`.
