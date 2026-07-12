@@ -1,22 +1,26 @@
 diff --git a/src/widget/wsearchlineedit.h b/src/widget/wsearchlineedit.h
-index 45d2d79..ed8784d 100644
+index 45d2d79..96910da 100644
 --- a/src/widget/wsearchlineedit.h
 +++ b/src/widget/wsearchlineedit.h
-@@ -53,6 +53,9 @@ class WSearchLineEdit : public QComboBox, public WBaseWidget {
+@@ -53,6 +53,13 @@ class WSearchLineEdit : public QComboBox, public WBaseWidget {
      void slotSetFont(const QFont& font);
  
      void slotRestoreSearch(const QString& text);
 +    /// Set the search text programmatically (e.g. from an on-screen keyboard)
 +    /// and run the search live, as if the user had typed it.
 +    void slotSetSearchText(const QString& text);
++    /// Append text to the current query and run the search (on-screen keyboard).
++    void slotAppendSearchText(const QString& text);
++    /// Delete the last character of the current query and run the search.
++    void slotBackspaceSearch();
      void slotDisableSearch();
  
      void slotClearSearch();
 diff --git a/src/widget/wsearchlineedit.cpp b/src/widget/wsearchlineedit.cpp
-index 1154fdf..8b59aff 100644
+index 1154fdf..1bb4393 100644
 --- a/src/widget/wsearchlineedit.cpp
 +++ b/src/widget/wsearchlineedit.cpp
-@@ -522,6 +522,19 @@ void WSearchLineEdit::slotRestoreSearch(const QString& text) {
+@@ -522,6 +522,34 @@ void WSearchLineEdit::slotRestoreSearch(const QString& text) {
      enableSearch(text);
  }
  
@@ -31,6 +35,21 @@ index 1154fdf..8b59aff 100644
 +    updateEditBox(text);
 +    triggerSearchDebounced();
 +    m_saveTimer.start(kSaveTimeoutMillis);
++}
++
++void WSearchLineEdit::slotAppendSearchText(const QString& text) {
++    // getSearchText() returns "" when the box is disabled/empty (never the
++    // placeholder), so appending is always safe.
++    slotSetSearchText(getSearchText() + text);
++}
++
++void WSearchLineEdit::slotBackspaceSearch() {
++    QString text = getSearchText();
++    if (text.isEmpty()) {
++        return;
++    }
++    text.chop(1);
++    slotSetSearchText(text);
 +}
 +
  void WSearchLineEdit::triggerSearchDebounced() {
@@ -73,7 +92,7 @@ index 924c635..476f446 100644
      std::unique_ptr<ControlPushButton> m_pFontSizeIncrement;
      std::unique_ptr<ControlPushButton> m_pFontSizeDecrement;
 diff --git a/src/library/librarycontrol.cpp b/src/library/librarycontrol.cpp
-index 6b8de2f..bd66cad 100644
+index 6b8de2f..7cc9627 100644
 --- a/src/library/librarycontrol.cpp
 +++ b/src/library/librarycontrol.cpp
 @@ -461,6 +461,46 @@ LibraryControl::LibraryControl(Library* pLibrary)
@@ -123,7 +142,7 @@ index 6b8de2f..bd66cad 100644
      // Show the track context menu for selected tracks, or hide it
      // if it is the current active window
      // The control is updated in slotUpdateTrackMenuControl with the actual state
-@@ -555,6 +595,27 @@ LibraryControl::LibraryControl(Library* pLibrary)
+@@ -555,6 +595,20 @@ LibraryControl::LibraryControl(Library* pLibrary)
  
  LibraryControl::~LibraryControl() = default;
  
@@ -131,21 +150,14 @@ index 6b8de2f..bd66cad 100644
 +    VERIFY_OR_DEBUG_ASSERT(m_pSearchbox) {
 +        return;
 +    }
-+    // getSearchText() returns "" when the box is disabled/empty (never the
-+    // placeholder), so appending is always safe.
-+    m_pSearchbox->slotSetSearchText(m_pSearchbox->getSearchText() + text);
++    m_pSearchbox->slotAppendSearchText(text);
 +}
 +
 +void LibraryControl::backspaceSearch() {
 +    VERIFY_OR_DEBUG_ASSERT(m_pSearchbox) {
 +        return;
 +    }
-+    QString text = m_pSearchbox->getSearchText();
-+    if (text.isEmpty()) {
-+        return;
-+    }
-+    text.chop(1);
-+    m_pSearchbox->slotSetSearchText(text);
++    m_pSearchbox->slotBackspaceSearch();
 +}
 +
  void LibraryControl::maybeCreateGroupController(const QString& group) {
