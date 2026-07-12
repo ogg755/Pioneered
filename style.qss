@@ -357,7 +357,7 @@ WLabel {
   color: #b6294c;
 }
 
-#UsbLockedBanner, #UsbEjectFailedBanner {
+#UsbLockedBanner, #UsbEjectFailedBanner, #LoadBlockedBanner {
   background-color: #b6294c;
   border-radius: 4px;
   color: white;
@@ -365,6 +365,11 @@ WLabel {
   font-weight: bold;
   margin: 6px;
   qproperty-alignment: AlignCenter;
+}
+
+#UsbLockedBanner {
+  font-size: 11px;
+  qproperty-wordWrap: true;
 }
 
 #LoadDeck1, #LoadDeck2 {

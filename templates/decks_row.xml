@@ -1,0 +1,55 @@
+<Template>
+  <WidgetGroup>
+    <ObjectName>Decks</ObjectName>
+    <Layout>horizontal</Layout>
+    <Size>0me,90f</Size>
+    <Children>
+      <Template src="skin:templates/load_button.xml">
+        <SetVariable name="channel">1</SetVariable>
+      </Template>
+      <Template src="skin:deck.xml">
+        <SetVariable name="channel">1</SetVariable>
+      </Template>
+      <WidgetGroup>
+        <ObjectName>UsbBanners</ObjectName>
+        <Layout>vertical</Layout>
+        <Size>150f,0me</Size>
+        <Children>
+          <Label>
+            <ObjectName>UsbLockedBanner</ObjectName>
+            <Text>PLAYING FROM USB — PAUSE TO EJECT, KEEP HOLDING TO FORCE</Text>
+            <SizePolicy>me,me</SizePolicy>
+            <Connection>
+              <ConfigKey persist="false">[Library],usb_locked</ConfigKey>
+              <BindProperty>visible</BindProperty>
+            </Connection>
+          </Label>
+          <Label>
+            <ObjectName>UsbEjectFailedBanner</ObjectName>
+            <Text>EJECT FAILED</Text>
+            <SizePolicy>me,me</SizePolicy>
+            <Connection>
+              <ConfigKey persist="false">[Library],usb_eject_failed</ConfigKey>
+              <BindProperty>visible</BindProperty>
+            </Connection>
+          </Label>
+          <Label>
+            <ObjectName>LoadBlockedBanner</ObjectName>
+            <Text>PAUSE DECK TO LOAD</Text>
+            <SizePolicy>me,me</SizePolicy>
+            <Connection>
+              <ConfigKey persist="false">[Library],load_blocked</ConfigKey>
+              <BindProperty>visible</BindProperty>
+            </Connection>
+          </Label>
+        </Children>
+      </WidgetGroup>
+      <Template src="skin:deck.xml">
+        <SetVariable name="channel">2</SetVariable>
+      </Template>
+      <Template src="skin:templates/load_button.xml">
+        <SetVariable name="channel">2</SetVariable>
+      </Template>
+    </Children>
+  </WidgetGroup>
+</Template>

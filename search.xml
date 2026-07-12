@@ -26,19 +26,7 @@
       <SingletonContainer>
         <ObjectName>LibraryTable_Singleton</ObjectName>
       </SingletonContainer>
-      <WidgetGroup>
-        <ObjectName>SearchLoadRow</ObjectName>
-        <Layout>horizontal</Layout>
-        <Size>0me,44f</Size>
-        <Children>
-          <Template src="skin:templates/load_button.xml">
-            <SetVariable name="channel">1</SetVariable>
-          </Template>
-          <Template src="skin:templates/load_button.xml">
-            <SetVariable name="channel">2</SetVariable>
-          </Template>
-        </Children>
-      </WidgetGroup>
+      <Template src="skin:templates/decks_row.xml"/>
       <WidgetGroup>
         <ObjectName>KeyboardWrap</ObjectName>
         <Layout>vertical</Layout>
