@@ -1,0 +1,155 @@
+diff --git a/src/library/librarycontrol.h b/src/library/librarycontrol.h
+index 476f446..7270630 100644
+--- a/src/library/librarycontrol.h
++++ b/src/library/librarycontrol.h
+@@ -125,7 +125,7 @@ class LibraryControl : public QObject {
+     void slotUsbButtonPress(int usbIndex);
+     void slotUsbButtonRelease(int usbIndex);
+     void slotHoldFlashTick();
+-    void finishHoldEject(int usbIndex);
++    void stopDecksPlayingFromUsb(int usbIndex);
+     void browseToggleUsb(int usbIndex);
+     void startEject(int usbIndex);
+     void unloadDecksFromUsb(int usbIndex);
+@@ -150,6 +150,7 @@ class LibraryControl : public QObject {
+     std::unique_ptr<ControlPushButton> m_pUsbStateB;
+     std::unique_ptr<ControlPushButton> m_pUsbLocked;
+     std::unique_ptr<ControlPushButton> m_pUsbEjectFailed;
++    std::unique_ptr<ControlPushButton> m_pLoadBlocked;
+     QTimer m_holdFlashTimer;
+     QTimer m_bannerClearTimer;
+     QElapsedTimer m_holdElapsed;
+@@ -157,6 +158,9 @@ class LibraryControl : public QObject {
+     int m_holdUsb = 0;  // 0 = no hold in progress, 1 = USBA, 2 = USBB
+     bool m_flashOn = false;
+     bool m_ejectRunning = false;
++    // True once the "locked" banner fired at the 5s tier of the current
++    // hold, so it only shows once while the hold continues toward force.
++    bool m_holdLockedBannerShown = false;
+     int m_ejectAttemptsLeft = 0;
+     QPersistentModelIndex m_rootedDeviceIndex;
+     int m_rootedUsb = 0; // 0 = full tree, 1 = USBA, 2 = USBB
+diff --git a/src/library/librarycontrol.cpp b/src/library/librarycontrol.cpp
+index 7cc9627..e3f2b5f 100644
+--- a/src/library/librarycontrol.cpp
++++ b/src/library/librarycontrol.cpp
+@@ -276,6 +276,18 @@ LibraryControl::LibraryControl(Library* pLibrary)
+             ConfigKey("[Library]", "usb_locked"));
+     m_pUsbEjectFailed = std::make_unique<ControlPushButton>(
+             ConfigKey("[Library]", "usb_eject_failed"));
++    m_pLoadBlocked = std::make_unique<ControlPushButton>(
++            ConfigKey("[Library]", "load_blocked"));
++    // Set from WTrackTableView when a load is rejected because the target
++    // deck is playing. Start the banner clear timer as showBanner() would.
++    connect(m_pLoadBlocked.get(),
++            &ControlPushButton::valueChanged,
++            this,
++            [this](double value) {
++                if (value > 0.0) {
++                    m_bannerClearTimer.start();
++                }
++            });
+ 
+     m_holdFlashTimer.setInterval(40);
+     connect(&m_holdFlashTimer,
+@@ -1185,6 +1197,7 @@ void LibraryControl::slotUsbButtonPress(int usbIndex) {
+     }
+     m_holdUsb = usbIndex;
+     m_flashOn = false;
++    m_holdLockedBannerShown = false;
+     m_lastFlashToggleMs = 0;
+     m_holdElapsed.start();
+     m_holdFlashTimer.start();
+@@ -1211,20 +1224,43 @@ void LibraryControl::slotHoldFlashTick() {
+         return;
+     }
+     const qint64 elapsed = m_holdElapsed.elapsed();
+-    if (elapsed >= 5000) {
++    if (elapsed >= 10000) {
++        // Force tier: stop any deck still playing from this stick, then
++        // run the normal eject path (it unloads the now-paused decks and
++        // retries umount while the caching reader closes files).
+         m_holdFlashTimer.stop();
+         const int usbIndex = m_holdUsb;
+         m_holdUsb = 0;
+         m_flashOn = false;
+         updateUsbStateControls();
+-        finishHoldEject(usbIndex);
++        stopDecksPlayingFromUsb(usbIndex);
++        startEject(usbIndex);
+         return;
+     }
++    if (elapsed >= 5000) {
++        if (!isUsbInUse(m_holdUsb)) {
++            // Stick free (or the blocking deck stopped mid-hold): eject now.
++            m_holdFlashTimer.stop();
++            const int usbIndex = m_holdUsb;
++            m_holdUsb = 0;
++            m_flashOn = false;
++            updateUsbStateControls();
++            startEject(usbIndex);
++            return;
++        }
++        // Locked: tell the operator once, keep the hold alive toward force.
++        if (!m_holdLockedBannerShown) {
++            m_holdLockedBannerShown = true;
++            showBanner(m_pUsbLocked.get());
++        }
++    }
+     if (elapsed < 600) {
+         return;
+     }
+-    // Flash toggle interval shrinks linearly 250ms -> 80ms over the hold
+-    const qint64 interval = 250 - (250 - 80) * (elapsed - 600) / (5000 - 600);
++    // Flash toggle interval shrinks linearly 250ms -> 80ms over the first
++    // 5s of the hold, then stays at the 80ms cap through the force tier.
++    const qint64 interval = qMax<qint64>(80,
++            250 - (250 - 80) * (elapsed - 600) / (5000 - 600));
+     if (m_lastFlashToggleMs == 0 || elapsed - m_lastFlashToggleMs >= interval) {
+         m_flashOn = !m_flashOn;
+         m_lastFlashToggleMs = elapsed;
+@@ -1232,12 +1268,17 @@ void LibraryControl::slotHoldFlashTick() {
+     }
+ }
+ 
+-void LibraryControl::finishHoldEject(int usbIndex) {
+-    if (isUsbInUse(usbIndex)) {
+-        showBanner(m_pUsbLocked.get());
+-        return;
++void LibraryControl::stopDecksPlayingFromUsb(int usbIndex) {
++    const QString prefix = usbMountPath(usbIndex) + QStringLiteral("/");
++    const QStringList groups = {QStringLiteral("[Channel1]"),
++            QStringLiteral("[Channel2]")};
++    for (const QString& group : groups) {
++        const TrackPointer pTrack = PlayerInfo::instance().getTrackInfo(group);
++        if (pTrack && pTrack->getLocation().startsWith(prefix) &&
++                ControlObject::get(ConfigKey(group, QStringLiteral("play"))) > 0.0) {
++            ControlObject::set(ConfigKey(group, QStringLiteral("play")), 0.0);
++        }
+     }
+-    startEject(usbIndex);
+ }
+ 
+ bool LibraryControl::isUsbInUse(int usbIndex) const {
+@@ -1381,6 +1422,7 @@ void LibraryControl::showBanner(ControlPushButton* pBanner) {
+ void LibraryControl::clearBanners() {
+     m_pUsbLocked->setAndConfirm(0.0);
+     m_pUsbEjectFailed->setAndConfirm(0.0);
++    m_pLoadBlocked->setAndConfirm(0.0);
+ }
+ 
+ void LibraryControl::updateUsbStateControls() {
+diff --git a/src/widget/wtracktableview.cpp b/src/widget/wtracktableview.cpp
+index e468139..95355ee 100644
+--- a/src/widget/wtracktableview.cpp
++++ b/src/widget/wtracktableview.cpp
+@@ -1394,6 +1394,9 @@ void WTrackTableView::loadSelectedTrackToGroup(const QString& group, bool play)
+     if (!allowLoadTrackIntoPlayingDeck &&
+             !PlayerManager::isPreviewDeckGroup(group) &&
+             ControlObject::get(ConfigKey(group, "play")) > 0.0) {
++        // Surface the silent rejection; the Pioneered skin shows a
++        // "PAUSE DECK TO LOAD" banner bound to this control.
++        ControlObject::set(ConfigKey("[Library]", "load_blocked"), 1.0);
+         return;
+     }
+     auto index = indices.at(0);
