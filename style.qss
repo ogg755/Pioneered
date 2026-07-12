@@ -512,3 +512,71 @@ WBeatSpinBox::up-button {
 #SamplersDeck1, #SamplersDeck2 {
   margin: 0 4px;
 }
+
+/************************************************************************/
+/*     Track search + on-screen keyboard                                */
+/************************************************************************/
+
+#SearchPage {
+  background-color: #16161a;
+}
+
+#SearchFieldRow {
+  background-color: #1a1a20;
+}
+
+#SearchFieldRow WSearchLineEdit {
+  background-color: #0d0d10;
+  border: 1px solid #45454f;
+  border-radius: 3px;
+  color: #e6e6e6;
+  font-size: 16px;
+  margin: 4px;
+  padding: 4px 8px;
+}
+
+#KbShow {
+  background-color: #1a1a20;
+  border: 1px solid #444444;
+  border-radius: 3px;
+  color: #aaaaaa;
+  font-size: 18px;
+  font-weight: bold;
+  margin: 4px;
+}
+
+#KbShow[value="1"] {
+  background-color: #b6294c;
+  border: 1px solid #b6294c;
+  color: white;
+}
+
+#Keyboard {
+  background-color: #1a1a20;
+}
+
+#Keyboard WPushButton {
+  background-color: #3a3a44;
+  border: 1px solid #4d4d59;
+  border-radius: 4px;
+  color: #f0f0f0;
+  font-size: 15px;
+  font-weight: bold;
+  margin: 2px;
+}
+
+#Keyboard WPushButton:pressed {
+  background-color: #b6294c;
+  border: 1px solid #b6294c;
+  color: white;
+}
+
+#KbClear, #KbBackspace {
+  color: #ffb3c0;
+}
+
+#KbDone[value="1"] {
+  background-color: #b6294c;
+  border: 1px solid #b6294c;
+  color: white;
+}
