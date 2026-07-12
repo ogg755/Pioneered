@@ -1,0 +1,153 @@
+diff --git a/src/widget/wsearchlineedit.h b/src/widget/wsearchlineedit.h
+index 45d2d79..ed8784d 100644
+--- a/src/widget/wsearchlineedit.h
++++ b/src/widget/wsearchlineedit.h
+@@ -53,6 +53,9 @@ class WSearchLineEdit : public QComboBox, public WBaseWidget {
+     void slotSetFont(const QFont& font);
+ 
+     void slotRestoreSearch(const QString& text);
++    /// Set the search text programmatically (e.g. from an on-screen keyboard)
++    /// and run the search live, as if the user had typed it.
++    void slotSetSearchText(const QString& text);
+     void slotDisableSearch();
+ 
+     void slotClearSearch();
+diff --git a/src/widget/wsearchlineedit.cpp b/src/widget/wsearchlineedit.cpp
+index 1154fdf..8b59aff 100644
+--- a/src/widget/wsearchlineedit.cpp
++++ b/src/widget/wsearchlineedit.cpp
+@@ -522,6 +522,19 @@ void WSearchLineEdit::slotRestoreSearch(const QString& text) {
+     enableSearch(text);
+ }
+ 
++void WSearchLineEdit::slotSetSearchText(const QString& text) {
++    // Programmatic entry point for the on-screen keyboard. Unlike
++    // slotRestoreSearch(), this re-runs the search: updateEditBox() sets the
++    // text with signals blocked (no double-trigger), so we schedule the same
++    // debounced search + history-save that slotTextChanged() does for typing.
++    if (!isEnabled()) {
++        setEnabled(true);
++    }
++    updateEditBox(text);
++    triggerSearchDebounced();
++    m_saveTimer.start(kSaveTimeoutMillis);
++}
++
+ void WSearchLineEdit::triggerSearchDebounced() {
+     DEBUG_ASSERT(m_debouncingTimer.isSingleShot());
+     DEBUG_ASSERT(s_debouncingTimeoutMillis >= kMinDebouncingTimeoutMillis);
+diff --git a/src/library/librarycontrol.h b/src/library/librarycontrol.h
+index 924c635..476f446 100644
+--- a/src/library/librarycontrol.h
++++ b/src/library/librarycontrol.h
+@@ -5,6 +5,7 @@
+ #include <QPersistentModelIndex>
+ #include <QTimer>
+ #include <memory>
++#include <vector>
+ 
+ #include "control/controlproxy.h"
+ #include "library/library_decl.h"
+@@ -139,6 +140,10 @@ class LibraryControl : public QObject {
+     void restoreSidebarRoot();
+     void validateSidebarRoot();
+ 
++    // On-screen-keyboard search input helpers (drive the bound searchbox).
++    void appendToSearch(const QString& text);
++    void backspaceSearch();
++
+     std::unique_ptr<ControlPushButton> m_pGotoUsbA;
+     std::unique_ptr<ControlPushButton> m_pGotoUsbB;
+     std::unique_ptr<ControlPushButton> m_pUsbStateA;
+@@ -218,6 +223,12 @@ class LibraryControl : public QObject {
+     std::unique_ptr<ControlPushButton> m_pClearSearch;
+     std::unique_ptr<ControlPushButton> m_pDeleteSearchQuery;
+ 
++    // On-screen-keyboard search input: one push control per typeable
++    // character, plus space and backspace. Clearing reuses clear_search.
++    std::vector<std::unique_ptr<ControlPushButton>> m_searchKeys;
++    std::unique_ptr<ControlPushButton> m_pSearchSpace;
++    std::unique_ptr<ControlPushButton> m_pSearchBackspace;
++
+     // Font sizes
+     std::unique_ptr<ControlPushButton> m_pFontSizeIncrement;
+     std::unique_ptr<ControlPushButton> m_pFontSizeDecrement;
+diff --git a/src/library/librarycontrol.cpp b/src/library/librarycontrol.cpp
+index 6b8de2f..bd66cad 100644
+--- a/src/library/librarycontrol.cpp
++++ b/src/library/librarycontrol.cpp
+@@ -461,6 +461,46 @@ LibraryControl::LibraryControl(Library* pLibrary)
+                 }
+             });
+ 
++    // On-screen-keyboard search controls (drive the bound searchbox). Guard
++    // like the other search handlers; act only on the press edge (value > 0).
++    const QString kSearchKeyChars =
++            QStringLiteral("abcdefghijklmnopqrstuvwxyz0123456789");
++    for (const QChar& ch : kSearchKeyChars) {
++        auto pKey = std::make_unique<ControlPushButton>(
++                ConfigKey(QStringLiteral("[Library]"),
++                        QStringLiteral("search_key_%1").arg(ch)));
++        const QString s(ch);
++        connect(pKey.get(),
++                &ControlPushButton::valueChanged,
++                this,
++                [this, s](double value) {
++                    if (value > 0.0) {
++                        appendToSearch(s);
++                    }
++                });
++        m_searchKeys.push_back(std::move(pKey));
++    }
++    m_pSearchSpace = std::make_unique<ControlPushButton>(
++            ConfigKey(QStringLiteral("[Library]"), QStringLiteral("search_space")));
++    connect(m_pSearchSpace.get(),
++            &ControlPushButton::valueChanged,
++            this,
++            [this](double value) {
++                if (value > 0.0) {
++                    appendToSearch(QStringLiteral(" "));
++                }
++            });
++    m_pSearchBackspace = std::make_unique<ControlPushButton>(
++            ConfigKey(QStringLiteral("[Library]"), QStringLiteral("search_backspace")));
++    connect(m_pSearchBackspace.get(),
++            &ControlPushButton::valueChanged,
++            this,
++            [this](double value) {
++                if (value > 0.0) {
++                    backspaceSearch();
++                }
++            });
++
+     // Show the track context menu for selected tracks, or hide it
+     // if it is the current active window
+     // The control is updated in slotUpdateTrackMenuControl with the actual state
+@@ -555,6 +595,27 @@ LibraryControl::LibraryControl(Library* pLibrary)
+ 
+ LibraryControl::~LibraryControl() = default;
+ 
++void LibraryControl::appendToSearch(const QString& text) {
++    VERIFY_OR_DEBUG_ASSERT(m_pSearchbox) {
++        return;
++    }
++    // getSearchText() returns "" when the box is disabled/empty (never the
++    // placeholder), so appending is always safe.
++    m_pSearchbox->slotSetSearchText(m_pSearchbox->getSearchText() + text);
++}
++
++void LibraryControl::backspaceSearch() {
++    VERIFY_OR_DEBUG_ASSERT(m_pSearchbox) {
++        return;
++    }
++    QString text = m_pSearchbox->getSearchText();
++    if (text.isEmpty()) {
++        return;
++    }
++    text.chop(1);
++    m_pSearchbox->slotSetSearchText(text);
++}
++
+ void LibraryControl::maybeCreateGroupController(const QString& group) {
+     if (m_loadToGroupControllers.find(group) == m_loadToGroupControllers.end()) {
+         m_loadToGroupControllers.emplace(group, std::make_unique<LoadToGroupController>(this, group));
