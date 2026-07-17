@@ -357,18 +357,20 @@ WLabel {
   color: #b6294c;
 }
 
+/* Centered popup banners (stacked overlay in skin.xml) */
 #UsbLockedBanner, #UsbEjectFailedBanner, #LoadBlockedBanner {
   background-color: #b6294c;
-  border-radius: 4px;
+  border: 2px solid white;
+  border-radius: 8px;
   color: white;
-  font-size: 16px;
+  font-size: 18px;
   font-weight: bold;
-  margin: 6px;
+  padding: 8px;
   qproperty-alignment: AlignCenter;
 }
 
 #UsbLockedBanner {
-  font-size: 11px;
+  font-size: 15px;
   qproperty-wordWrap: true;
 }
 
