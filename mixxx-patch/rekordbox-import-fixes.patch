@@ -1,0 +1,127 @@
+diff --git a/src/library/rekordbox/rekordboxfeature.cpp b/src/library/rekordbox/rekordboxfeature.cpp
+index 1df68c8..8d994f9 100644
+--- a/src/library/rekordbox/rekordboxfeature.cpp
++++ b/src/library/rekordbox/rekordboxfeature.cpp
+@@ -261,6 +261,14 @@ QString toUnicode(const std::string& toConvert) {
+             ->toUnicode(toConvert.data(), static_cast<int>(toConvert.length()));
+ }
+ 
++// ANLZ (DAT/EXT) files are big-endian throughout, including cue comment
++// strings, unlike the PDB device strings which are UTF-16LE.
++// Backport of upstream d96cae92ca ("hotcue comments are utf-16be").
++QString fromUtf16BeString(const std::string& toConvert) {
++    int length = static_cast<int>(toConvert.length()) - 2; // strip off trailing nullbyte
++    return QTextCodec::codecForName("UTF-16BE")->toUnicode(toConvert.data(), length);
++}
++
+ // Functions getText and parseDeviceDB are roughly based on the following Java file:
+ // https://github.com/Deep-Symmetry/crate-digger/commit/f09fa9fc097a2a428c43245ddd542ac1370c1adc
+ // getText is needed because the strings in the PDB file "have a variety of obscure representations".
+@@ -1031,7 +1039,7 @@ void readAnalyze(TrackPointer track,
+                         memory_cue_loop_t memoryCue;
+                         memoryCue.startPosition = position;
+                         memoryCue.endPosition = mixxx::audio::kInvalidFramePos;
+-                        memoryCue.comment = toUnicode(cueExtendedEntry->comment());
++                        memoryCue.comment = fromUtf16BeString(cueExtendedEntry->comment());
+                         memoryCue.color = colorFromID(static_cast<int>(
+                                 cueExtendedEntry->color_id()));
+                         memoryCuesAndLoops << memoryCue;
+@@ -1050,7 +1058,7 @@ void readAnalyze(TrackPointer track,
+                         loop.startPosition = position;
+                         loop.endPosition = mixxx::audio::FramePos(
+                                 sampleRateKhz * static_cast<double>(endTime));
+-                        loop.comment = toUnicode(cueExtendedEntry->comment());
++                        loop.comment = fromUtf16BeString(cueExtendedEntry->comment());
+                         loop.color = colorFromID(static_cast<int>(cueExtendedEntry->color_id()));
+                         memoryCuesAndLoops << loop;
+                     } break;
+@@ -1065,7 +1073,7 @@ void readAnalyze(TrackPointer track,
+                             position,
+                             mixxx::audio::kInvalidFramePos,
+                             hotCueIndex,
+-                            toUnicode(cueExtendedEntry->comment()),
++                            fromUtf16BeString(cueExtendedEntry->comment()),
+                             mixxx::RgbColor(qRgb(
+                                     static_cast<int>(
+                                             cueExtendedEntry->color_red()),
+diff --git a/lib/rekordbox-metadata/rekordbox_pdb.cpp b/lib/rekordbox-metadata/rekordbox_pdb.cpp
+index 89f355e..fca8e07 100644
+--- a/lib/rekordbox-metadata/rekordbox_pdb.cpp
++++ b/lib/rekordbox-metadata/rekordbox_pdb.cpp
+@@ -227,9 +227,16 @@ void rekordbox_pdb_t::page_t::_read() {
+     m_next_page = std::unique_ptr<page_ref_t>(new page_ref_t(m__io, this, m__root));
+     m__unnamed4 = m__io->read_u4le();
+     m__unnamed5 = m__io->read_bytes(4);
+-    m_num_rows_small = m__io->read_u1();
+-    m__unnamed7 = m__io->read_u1();
+-    m__unnamed8 = m__io->read_u1();
++    // These 3 bytes are really a 13-bit row count plus an 11-bit
++    // "rows valid" count (little-endian bit order), not the old
++    // num_rows_small/num_rows_large heuristic, which undercounted rows
++    // on pages with many small rows (playlist entries, tracks) and
++    // silently dropped their contents. Backport of upstream 2144bf9075
++    // (PR #15745, fix/rekordbox-missing-table-rows).
++    m_num_rows = static_cast<uint16_t>(m__io->read_bits_int_le(13));
++    m_num_rows_valid = static_cast<uint16_t>(m__io->read_bits_int_le(11));
++    m__io->align_to_byte();
++    f_num_rows = true;
+     m_page_flags = m__io->read_u1();
+     m_free_size = m__io->read_u2le();
+     m_used_size = m__io->read_u2le();
+@@ -256,10 +263,8 @@ void rekordbox_pdb_t::page_t::_clean_up() {
+ }
+ 
+ uint16_t rekordbox_pdb_t::page_t::num_rows() {
+-    if (f_num_rows)
+-        return m_num_rows;
+-    m_num_rows = (( ((num_rows_large() > num_rows_small()) && (num_rows_large() != 8191)) ) ? (num_rows_large()) : (num_rows_small()));
+-    f_num_rows = true;
++    // Now read directly as a 13-bit field in _read(); the old
++    // num_rows_small/num_rows_large heuristic was wrong.
+     return m_num_rows;
+ }
+ 
+diff --git a/lib/rekordbox-metadata/rekordbox_pdb.h b/lib/rekordbox-metadata/rekordbox_pdb.h
+index 76f7b51..2da581d 100644
+--- a/lib/rekordbox-metadata/rekordbox_pdb.h
++++ b/lib/rekordbox-metadata/rekordbox_pdb.h
+@@ -515,9 +515,7 @@ public:
+         std::unique_ptr<page_ref_t> m_next_page;
+         uint32_t m__unnamed4;
+         std::string m__unnamed5;
+-        uint8_t m_num_rows_small;
+-        uint8_t m__unnamed7;
+-        uint8_t m__unnamed8;
++        uint16_t m_num_rows_valid;
+         uint8_t m_page_flags;
+         uint16_t m_free_size;
+         uint16_t m_used_size;
+@@ -567,25 +565,10 @@ public:
+         std::string _unnamed5() const { return m__unnamed5; }
+ 
+         /**
+-         * Holds the value used for `num_rows` (see below) unless
+-         * `num_rows_large` is larger (but not equal to `0x1fff`). This
+-         * seems like some strange mechanism to deal with the fact that
+-         * lots of tiny entries, such as are found in the
+-         * `playlist_entries` table, are too big to count with a single
+-         * byte. But why not just always use `num_rows_large`, then?
+-         */
+-        uint8_t num_rows_small() const { return m_num_rows_small; }
+-
+-        /**
+-         * @flesniak said: "a bitmask (1st track: 32)"
+-         */
+-        uint8_t _unnamed7() const { return m__unnamed7; }
+-
+-        /**
+-         * @flesniak said: "often 0, sometimes larger, esp. for pages
+-         * with high real_entry_count (e.g. 12 for 101 entries)"
++         * The number of rows valid on this page (13-bit num_rows is read
++         * in _read() together with this 11-bit field; see rekordbox_pdb.cpp).
+          */
+-        uint8_t _unnamed8() const { return m__unnamed8; }
++        uint16_t num_rows_valid() const { return m_num_rows_valid; }
+ 
+         /**
+          * @flesniak said: "strange pages: 0x44, 0x64; otherwise seen: 0x24, 0x34"

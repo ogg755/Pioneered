@@ -51,3 +51,13 @@
    silently rejected because the target deck is playing (skin shows
    "PAUSE DECK TO LOAD"). Touches `src/library/librarycontrol.{h,cpp}`,
    `src/widget/wtracktableview.cpp`.
+8. `rekordbox-import-fixes.patch` (added 2026-07-17) — two upstream backports:
+   (a) ANLZ cue/loop comments decoded as UTF-16**BE** (they were decoded LE,
+   turning ASCII labels into CJK mojibake on the waveform; upstream
+   d96cae92ca, fixes mixxx#14789); (b) PDB page header's row count is really
+   a 13-bit `num_rows` + 11-bit `num_rows_valid` bitfield — the old
+   `num_rows_small`/`num_rows_large` heuristic undercounted rows on pages
+   with many small rows, so playlists imported with most/all entries missing
+   (upstream 2144bf9075, PR mixxx#15745). Touches
+   `src/library/rekordbox/rekordboxfeature.cpp`,
+   `lib/rekordbox-metadata/rekordbox_pdb.{cpp,h}`.
