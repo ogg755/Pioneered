@@ -1,5 +1,18 @@
 # XDJ400 Pi deployment notes
 
+## One-shot updater (preferred)
+Copy `pi/update-pioneered.sh` to the Pi once, then to update everything
+(debs + skin) from the latest GitHub release with no further input:
+
+    sudo ./update-pioneered.sh            # latest release
+    sudo ./update-pioneered.sh v2.5.0-r18 # specific release / rollback
+
+It downloads the release's three debs and the matching skin source,
+installs them non-interactively, re-holds the packages, installs the skin
+to the login user's `~/.mixxx/skins/Pioneered`, and reboots after a 10 s
+Ctrl-C-able countdown. Requires the release to have the three debs
+attached (the manual steps below remain as fallback).
+
 ## Skin
 scp -r Pioneered rpims@XDJ400.local:~/.mixxx/skins/
 Select in Preferences > Interface. Library sizing (library-ui patch, r10+):
