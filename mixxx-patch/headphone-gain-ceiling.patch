@@ -1,0 +1,35 @@
+Description: Raise the headphone (cue) gain ceiling for the DDJ-400 on the Pi
+ On the XDJ400 (Pi 4B + DDJ-400, raw-ALSA output), the cue bus (ch 3-4)
+ tops out far too quiet even with [Master],headGain maxed. A bypass test
+ (aplay injecting a -6 dBFS tone straight into hw:CARD,0 ch 3-4, Mixxx out
+ of the loop) is loud AND clean, which exonerates the DAC, ALSA, the
+ snd-usb-audio driver, the S24_3LE format, and PortAudio: the DDJ-400's
+ headphone DAC has ~20 dB of clean headroom above the level Mixxx reaches.
+ .
+ The bottleneck is Mixxx's single headphone gain stage, whose ceiling is
+ +14 dB (linear x5.0 -- the "reaches 5.0" the user saw on screen). The cue
+ PFL on this rig lands so low that even +14 dB leaves it quiet while still
+ well below 0 dBFS, so the knob "runs out" (plateaus) before the signal is
+ loud. Raising the ceiling to +30 dB gives ~16 dB more usable travel; the
+ aplay headroom proof means that extra gain lands clean rather than
+ clipping. The stage is an audio-taper pot, so unity (0 dB) stays at knob
+ centre and only the top end extends -- existing behaviour below unity is
+ unchanged.
+ .
+ Note: if the physical HEADPHONES LEVEL knob is re-mapped to headGain in
+ the DDJ-400 MIDI script, scale it to the new max (linear x31.6 = +30 dB)
+ or drive it via setParameter, or it will still cap at the old x5.0.
+Author: Pioneered CI <pioneered-build@localhost>
+Forwarded: no
+
+--- a/src/engine/enginemixer.cpp
++++ b/src/engine/enginemixer.cpp
+@@ -125,7 +125,7 @@ EngineMixer::EngineMixer(
+             new EngineDelay(ConfigKey(group, "microphoneLatencyCompensation"));
+
+     // Headphone volume
+-    m_pHeadGain = new ControlAudioTaperPot(ConfigKey(group, "headGain"), -14, 14, 0.5);
++    m_pHeadGain = new ControlAudioTaperPot(ConfigKey(group, "headGain"), -14, 30, 0.5);
+
+     // Legacy: the headphone "headGain" control used to be named "headVolume" in
+     // Mixxx 1.11.0 and earlier. See issue #7413.

@@ -70,3 +70,12 @@
    visible banners don't swallow touches. Also bumps the banner clear timer
    2s -> 3s for readability. Touches `src/skin/legacy/legacyskinparser.cpp`,
    `src/library/librarycontrol.cpp`.
+10. `headphone-gain-ceiling.patch` (added 2026-07-19) — raises the cue/PFL
+    headphone gain ceiling from +14 dB to +30 dB (`[Master],headGain`). The
+    DDJ-400 cue out (ch 3-4) maxed out far too quiet on the Pi; an aplay
+    -6 dBFS bypass tone straight to hw ch 3-4 (Mixxx out of the loop) was
+    loud and clean, exonerating the DAC/ALSA/format/PortAudio path and
+    proving ~20 dB of clean headroom the +14 dB stage could not reach.
+    Audio-taper pot, so unity stays at knob centre; only the top extends.
+    Touches `src/engine/enginemixer.cpp`. If the physical HEADPHONES LEVEL
+    knob is re-mapped to headGain, scale it to the new x31.6 max.

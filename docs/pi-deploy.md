@@ -71,6 +71,44 @@ with flock; without it, two sticks inserted simultaneously both grabbed
   the Openbox autostart file (~/.config/openbox/autostart) after the eject
   feature passes testing.
 
+## Headphone (cue) distortion on ch 3-4 — diagnosis
+Symptom evolution: phones out (ch 3-4) was quiet on the Pi, and after the
+MIDI headphone knob was unmapped it now distorts/clips even at low volume,
+while MASTER (ch 1-2) plays clean and loud through the *same* raw-ALSA
+stream, format and DAC. The controller + phones are loud and clean under
+Mixxx on a laptop.
+
+Card facts (from `stream0`): 44100 Hz only; formats S16_LE and S24_3LE;
+4 channels labelled `FL FR FC LFE`; **no hardware mixer controls at all**
+(so there is no card volume to raise — the old "max the mixers" advice does
+not apply to this interface). The `FC/LFE` labels are why `PA_ALSA_PLUGHW=1`
+made it *worse*: the plug layer treated ch 3-4 as centre/subwoofer and
+applied surround downmixing + an LFE low-pass to the cue bus. Do not use
+PLUGHW on this card without an explicit 1:1 `ttable`.
+
+Because ch 1-2 and ch 3-4 share one interleaved buffer yet only ch 3-4
+corrupts, a whole-stream format bug is unlikely. Two suspects remain:
+(A) Mixxx writes a hot/corrupt signal into the cue bus (digital, above ALSA);
+(B) the S24_3LE 4-channel interleave corrupts only the trailing channel pair
+on PortAudio's raw-hw path (3-byte packing misalignment).
+
+Copy `pi/audio-diag.sh` to the Pi and run:
+
+  ./audio-diag.sh               # card + stream0 caps + mixer controls (report)
+  ./audio-diag.sh matrix        # Mixxx closed: inject -6 dBFS tones,
+                                # {S16_LE,S24_3LE} x {ch1,ch3,ch4}, via aplay
+
+At -6 dBFS nothing can legitimately clip, so any distortion is corruption.
+Compare ch1 vs ch3/ch4 within each format (full table in the script header):
+- ch3/4 clean both formats → suspect (A): Mixxx cue bus. Lower
+  `[Master],headGain` toward unity, watch the headphone CLIP light, check
+  pregains aren't stacking.
+- ch3/4 distort only in S24_3LE → suspect (B): force the card to S16_LE via a
+  named 1:1 `plug` pcm and select it in Mixxx (the script prints the
+  `~/.asoundrc` snippet).
+- ch3/4 distort in both formats → driver-level; capture `dmesg | grep -i snd`
+  and the `aplay --dump-hw-params` output the matrix prints.
+
 ## Crash diagnostics
 One-time setup:  sudo apt install -y systemd-coredump gdb
 (Debug symbols come from the mixxx-dbgsym package installed above.)
