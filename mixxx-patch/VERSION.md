@@ -61,3 +61,12 @@
    (upstream 2144bf9075, PR mixxx#15745). Touches
    `src/library/rekordbox/rekordboxfeature.cpp`,
    `lib/rekordbox-metadata/rekordbox_pdb.{cpp,h}`.
+9. `banner-overlay-transparency.patch` (added 2026-07-19, r20) — skin parser
+   gains an optional `<TransparentForMouseEvents>true</...>` node on any
+   widget, setting `Qt::WA_TransparentForMouseEvents`. The full-screen popup
+   banner overlays use it so that showing a banner over the held USB button
+   no longer sends the button a Leave event (WPushButton fakes a mouse
+   release on Leave, which cancelled the 5-10s force-eject hold), and so
+   visible banners don't swallow touches. Also bumps the banner clear timer
+   2s -> 3s for readability. Touches `src/skin/legacy/legacyskinparser.cpp`,
+   `src/library/librarycontrol.cpp`.

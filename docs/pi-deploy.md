@@ -58,11 +58,11 @@ with flock; without it, two sticks inserted simultaneously both grabbed
 ## Ejecting USB sticks (hold-to-eject)
 - Hold USB A/USB B ~5 s: the button flashes red/white, speeding up; at 5 s the
   stick is unmounted and its playlists/tracks disappear. Safe to pull.
-- "USB LOCKED" (2 s banner): a deck is PLAYING a track from that stick.
+- "USB LOCKED" (3 s banner): a deck is PLAYING a track from that stick.
   Pause it, then retry. Paused decks don't block eject: their tracks are
   automatically unloaded when the eject fires (a paused deck still holds
   the audio file open, which would otherwise make the unmount fail).
-- "EJECT FAILED" (2 s banner): unmount failed after several retries; the
+- "EJECT FAILED" (3 s banner): unmount failed after several retries; the
   stick is still mounted. umount's stderr is logged in Mixxx's log.
 - Short press is unchanged (browse toggle). Releasing mid-hold cancels.
 - Eject runs `sudo umount /media/USBX` from Mixxx; the same passwordless

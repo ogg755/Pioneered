@@ -80,17 +80,22 @@
 			<Children>
 				<!-- Popup overlays: listed before the main UI so they render on
 				     top of everything. Each group is only visible while its
-				     control is active; the stacked layout centers fixed-size
-				     children, so the group is sized to its label instead of
-				     me,me. Do NOT make these full-screen: a full-screen
-				     overlay appearing over the held USB button sends the
-				     button a Leave event, and WPushButton fakes a mouse
-				     release on Leave — which cancelled the 5-10s force-eject
-				     hold the moment the locked banner appeared. -->
+				     control is active; the label centers inside the full-screen
+				     group (stacked/vertical layouts align children centered).
+				     TransparentForMouseEvents (banner-overlay-transparency
+				     patch) keeps the full-screen layer out of mouse
+				     hit-testing: without it, the overlay appearing over the
+				     held USB button sends the button a Leave event, and
+				     WPushButton fakes a mouse release on Leave — cancelling
+				     the 5-10s force-eject hold the moment the locked banner
+				     appeared. It also stops a visible banner from swallowing
+				     every touch on screen. (Unpatched Mixxx ignores the tag;
+				     USB buttons are inert there anyway.) -->
 				<WidgetGroup>
 					<ObjectName>PopupOverlay</ObjectName>
 					<Layout>vertical</Layout>
-					<Size>480f,90f</Size>
+					<SizePolicy>me,me</SizePolicy>
+					<TransparentForMouseEvents>true</TransparentForMouseEvents>
 					<Children>
 						<Label>
 							<ObjectName>UsbLockedBanner</ObjectName>
@@ -106,7 +111,8 @@
 				<WidgetGroup>
 					<ObjectName>PopupOverlay</ObjectName>
 					<Layout>vertical</Layout>
-					<Size>480f,90f</Size>
+					<SizePolicy>me,me</SizePolicy>
+					<TransparentForMouseEvents>true</TransparentForMouseEvents>
 					<Children>
 						<Label>
 							<ObjectName>UsbEjectFailedBanner</ObjectName>
@@ -122,7 +128,8 @@
 				<WidgetGroup>
 					<ObjectName>PopupOverlay</ObjectName>
 					<Layout>vertical</Layout>
-					<Size>480f,90f</Size>
+					<SizePolicy>me,me</SizePolicy>
+					<TransparentForMouseEvents>true</TransparentForMouseEvents>
 					<Children>
 						<Label>
 							<ObjectName>LoadBlockedBanner</ObjectName>

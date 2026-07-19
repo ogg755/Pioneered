@@ -1,0 +1,32 @@
+diff --git a/src/skin/legacy/legacyskinparser.cpp b/src/skin/legacy/legacyskinparser.cpp
+index e6dbdfb..2daaeb5 100644
+--- a/src/skin/legacy/legacyskinparser.cpp
++++ b/src/skin/legacy/legacyskinparser.cpp
+@@ -2283,6 +2283,14 @@ void LegacySkinParser::setupWidget(const QDomNode& node,
+     }
+     setupSize(node, pWidget);
+ 
++    // Pioneered: pure-display widgets (popup banners) can opt out of mouse
++    // hit-testing entirely. Without this, a banner overlay appearing above
++    // a pressed button sends the button a Leave event, and WPushButton
++    // fakes a mouse release on Leave — cancelling e.g. an eject hold.
++    if (m_pContext->selectBool(node, "TransparentForMouseEvents", false)) {
++        pWidget->setAttribute(Qt::WA_TransparentForMouseEvents);
++    }
++
+     QString style = getStyleFromNode(node);
+     // Check if we should apply legacy library styling to this node.
+     if (m_pContext->selectBool(node, "LegacyTableViewStyle", false)) {
+diff --git a/src/library/librarycontrol.cpp b/src/library/librarycontrol.cpp
+index e3f2b5f..7c226ac 100644
+--- a/src/library/librarycontrol.cpp
++++ b/src/library/librarycontrol.cpp
+@@ -295,7 +295,7 @@ LibraryControl::LibraryControl(Library* pLibrary)
+             this,
+             &LibraryControl::slotHoldFlashTick);
+     m_bannerClearTimer.setSingleShot(true);
+-    m_bannerClearTimer.setInterval(2000);
++    m_bannerClearTimer.setInterval(3000);
+     connect(&m_bannerClearTimer,
+             &QTimer::timeout,
+             this,

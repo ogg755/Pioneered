@@ -1,0 +1,148 @@
+name: Publish release
+
+# Publishes a GitHub release for a pushed v* tag. Only runs when
+# docs/release-notes/<tag>.md exists in the repo at the tagged commit;
+# tags without a notes file are ignored.
+#
+# Deb assets (the one-shot Pi updater, pi/update-pioneered.sh, requires
+# every release to carry the three debs):
+#   - If the notes file contains the marker line `<!-- debs: rebuild -->`,
+#     the patched Mixxx debs are built from source (same recipe as
+#     build-mixxx-deb.yml, versioned after the tag instead of the run
+#     number). Use this whenever anything in mixxx-patch/ changed.
+#   - Otherwise the debs from the previous (latest) release are re-attached
+#     unchanged — for skin-only releases.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.check.outputs.publish }}
+      rebuild: ${{ steps.check.outputs.rebuild }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check release notes exist
+        id: check
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          NOTES="docs/release-notes/${TAG}.md"
+          if [[ ! -f "$NOTES" ]]; then
+            echo "No $NOTES in the repo — skipping release publish."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+          if grep -q '<!-- debs: rebuild -->' "$NOTES"; then
+            echo "rebuild=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "rebuild=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  build-debs:
+    needs: detect
+    if: needs.detect.outputs.publish == 'true' && needs.detect.outputs.rebuild == 'true'
+    runs-on: ubuntu-24.04-arm
+    container: debian:trixie
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable source repos and install build tools
+        run: |
+          echo "deb-src http://deb.debian.org/debian trixie main" \
+            > /etc/apt/sources.list.d/src.list
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential devscripts dpkg-dev quilt ca-certificates
+          apt-get build-dep -y mixxx
+
+      - name: Fetch and patch source
+        run: |
+          mkdir /build && cd /build
+          apt-get source mixxx
+          cd mixxx-*/
+          patch -p1 < "$GITHUB_WORKSPACE/mixxx-patch/usb-browse.patch"
+          patch -p1 < "$GITHUB_WORKSPACE/mixxx-patch/pdb-corruption-hardening.patch"
+          patch -p1 < "$GITHUB_WORKSPACE/mixxx-patch/xdj-behavior.patch"
+          patch -p1 < "$GITHUB_WORKSPACE/mixxx-patch/library-ui.patch"
+          patch -p1 < "$GITHUB_WORKSPACE/mixxx-patch/xdj-hardware.patch"
+          patch -p1 < "$GITHUB_WORKSPACE/mixxx-patch/search-osk.patch"
+          patch -p1 < "$GITHUB_WORKSPACE/mixxx-patch/usb-force-eject.patch"
+          patch -p1 < "$GITHUB_WORKSPACE/mixxx-patch/rekordbox-import-fixes.patch"
+          patch -p1 < "$GITHUB_WORKSPACE/mixxx-patch/banner-overlay-transparency.patch"
+          # Version the build after the release tag (v2.5.0-r20 -> +usbbrowse.r20.1)
+          # so deb versions keep increasing with the release series.
+          SUFFIX="${GITHUB_REF_NAME##*-}"
+          DEBEMAIL=pioneered-build@localhost DEBFULLNAME="Pioneered CI" \
+            dch --local "+usbbrowse.${SUFFIX}." "Pioneered patch build for ${GITHUB_REF_NAME}"
+
+      - name: Build package
+        run: |
+          cd /build/mixxx-*/
+          dpkg-buildpackage -b -uc -us
+
+      - name: Upload debs artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-debs
+          path: |
+            /build/mixxx_*.deb
+            /build/mixxx-data_*.deb
+            /build/mixxx-dbgsym_*.deb
+
+  reuse-debs:
+    needs: detect
+    if: needs.detect.outputs.publish == 'true' && needs.detect.outputs.rebuild == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download debs from previous release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PREV="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName)"
+          echo "Reusing debs from $PREV"
+          mkdir debs
+          gh release download "$PREV" --repo "$GITHUB_REPOSITORY" --pattern '*.deb' --dir debs
+          ls -l debs
+          test "$(ls debs/*.deb | wc -l)" -ge 3
+
+      - name: Upload debs artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-debs
+          path: debs/*.deb
+
+  release:
+    needs: [detect, build-debs, reuse-debs]
+    if: >-
+      !cancelled() && needs.detect.outputs.publish == 'true' &&
+      (needs.build-debs.result == 'success' || needs.reuse-debs.result == 'success')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-debs
+          path: debs
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          NOTES="docs/release-notes/${TAG}.md"
+          TITLE="$(head -1 "$NOTES" | sed 's/^# *//')"
+          tail -n +2 "$NOTES" | sed '1{/^$/d}' | grep -v '<!-- debs:' > body.md
+          gh release create "$TAG" debs/*.deb \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$TITLE" \
+            --notes-file body.md

@@ -32,6 +32,7 @@ jobs:
           patch -p1 < "$GITHUB_WORKSPACE/mixxx-patch/search-osk.patch"
           patch -p1 < "$GITHUB_WORKSPACE/mixxx-patch/usb-force-eject.patch"
           patch -p1 < "$GITHUB_WORKSPACE/mixxx-patch/rekordbox-import-fixes.patch"
+          patch -p1 < "$GITHUB_WORKSPACE/mixxx-patch/banner-overlay-transparency.patch"
           DEBEMAIL=pioneered-build@localhost DEBFULLNAME="Pioneered CI" \
             dch --local "+usbbrowse.r${GITHUB_RUN_NUMBER}." "Pioneered USB browse/eject patch build ${GITHUB_RUN_NUMBER}"
 
