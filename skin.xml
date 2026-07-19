@@ -80,12 +80,17 @@
 			<Children>
 				<!-- Popup overlays: listed before the main UI so they render on
 				     top of everything. Each group is only visible while its
-				     control is active; the label centers inside the full-screen
-				     group (stacked/vertical layouts align children centered). -->
+				     control is active; the stacked layout centers fixed-size
+				     children, so the group is sized to its label instead of
+				     me,me. Do NOT make these full-screen: a full-screen
+				     overlay appearing over the held USB button sends the
+				     button a Leave event, and WPushButton fakes a mouse
+				     release on Leave — which cancelled the 5-10s force-eject
+				     hold the moment the locked banner appeared. -->
 				<WidgetGroup>
 					<ObjectName>PopupOverlay</ObjectName>
 					<Layout>vertical</Layout>
-					<SizePolicy>me,me</SizePolicy>
+					<Size>480f,90f</Size>
 					<Children>
 						<Label>
 							<ObjectName>UsbLockedBanner</ObjectName>
@@ -101,7 +106,7 @@
 				<WidgetGroup>
 					<ObjectName>PopupOverlay</ObjectName>
 					<Layout>vertical</Layout>
-					<SizePolicy>me,me</SizePolicy>
+					<Size>480f,90f</Size>
 					<Children>
 						<Label>
 							<ObjectName>UsbEjectFailedBanner</ObjectName>
@@ -117,7 +122,7 @@
 				<WidgetGroup>
 					<ObjectName>PopupOverlay</ObjectName>
 					<Layout>vertical</Layout>
-					<SizePolicy>me,me</SizePolicy>
+					<Size>480f,90f</Size>
 					<Children>
 						<Label>
 							<ObjectName>LoadBlockedBanner</ObjectName>
