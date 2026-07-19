@@ -1,0 +1,196 @@
+diff --git a/src/library/librarycontrol.h b/src/library/librarycontrol.h
+index 7270630..34b6900 100644
+--- a/src/library/librarycontrol.h
++++ b/src/library/librarycontrol.h
+@@ -140,6 +140,15 @@ class LibraryControl : public QObject {
+     void restoreSidebarRoot();
+     void validateSidebarRoot();
+ 
++    // Pioneered hold-to-restart: the skin's LOAD buttons also press
++    // restart_hold_1/2. Holding either for 7s (accelerating flash, same
++    // feel as the USB eject hold) kills and relaunches Mixxx, so a
++    // misbehaving session can be recovered from the touchscreen alone.
++    void slotRestartHold(int deck, double v);
++    void slotRestartFlashTick();
++    void updateLoadFlashControls();
++    void triggerRestart();
++
+     // On-screen-keyboard search input helpers (drive the bound searchbox).
+     void appendToSearch(const QString& text);
+     void backspaceSearch();
+@@ -165,6 +174,19 @@ class LibraryControl : public QObject {
+     QPersistentModelIndex m_rootedDeviceIndex;
+     int m_rootedUsb = 0; // 0 = full tree, 1 = USBA, 2 = USBB
+ 
++    // Hold-to-restart state (independent of the USB hold above).
++    std::unique_ptr<ControlPushButton> m_pRestartHold1;
++    std::unique_ptr<ControlPushButton> m_pRestartHold2;
++    std::unique_ptr<ControlPushButton> m_pLoadFlash1;
++    std::unique_ptr<ControlPushButton> m_pLoadFlash2;
++    std::unique_ptr<ControlPushButton> m_pRestarting;
++    QTimer m_restartFlashTimer;
++    QElapsedTimer m_restartElapsed;
++    qint64 m_lastRestartFlashToggleMs = 0;
++    int m_restartHoldDeck = 0; // 0 = no hold, 1/2 = that deck's LOAD held
++    bool m_restartFlashOn = false;
++    bool m_restartTriggered = false;
++
+     Library* m_pLibrary;
+ 
+     // Simulate pressing a key on the keyboard
+diff --git a/src/library/librarycontrol.cpp b/src/library/librarycontrol.cpp
+index 7c226ac..0859de6 100644
+--- a/src/library/librarycontrol.cpp
++++ b/src/library/librarycontrol.cpp
+@@ -289,6 +289,39 @@ LibraryControl::LibraryControl(Library* pLibrary)
+                 }
+             });
+ 
++    // Pioneered hold-to-restart: the skin's LOAD buttons press
++    // restart_hold_1/2 alongside LoadSelectedTrack (1 on press, 0 on
++    // release). Holding either for 7s restarts Mixxx; load_flash_1/2
++    // (0 normal / 1 flash-white) drives the accelerating blink and the
++    // restarting banner tells the operator the restart is underway.
++    m_pRestartHold1 = std::make_unique<ControlPushButton>(
++            ConfigKey("[Library]", "restart_hold_1"));
++    m_pRestartHold1->connectValueChangeRequest(this,
++            [this](double value) {
++                m_pRestartHold1->setAndConfirm(value);
++                slotRestartHold(1, value);
++            });
++    m_pRestartHold2 = std::make_unique<ControlPushButton>(
++            ConfigKey("[Library]", "restart_hold_2"));
++    m_pRestartHold2->connectValueChangeRequest(this,
++            [this](double value) {
++                m_pRestartHold2->setAndConfirm(value);
++                slotRestartHold(2, value);
++            });
++    m_pLoadFlash1 = std::make_unique<ControlPushButton>(
++            ConfigKey("[Library]", "load_flash_1"));
++    m_pLoadFlash1->setStates(2);
++    m_pLoadFlash2 = std::make_unique<ControlPushButton>(
++            ConfigKey("[Library]", "load_flash_2"));
++    m_pLoadFlash2->setStates(2);
++    m_pRestarting = std::make_unique<ControlPushButton>(
++            ConfigKey("[Library]", "restarting"));
++    m_restartFlashTimer.setInterval(40);
++    connect(&m_restartFlashTimer,
++            &QTimer::timeout,
++            this,
++            &LibraryControl::slotRestartFlashTick);
++
+     m_holdFlashTimer.setInterval(40);
+     connect(&m_holdFlashTimer,
+             &QTimer::timeout,
+@@ -1281,6 +1314,103 @@ void LibraryControl::stopDecksPlayingFromUsb(int usbIndex) {
+     }
+ }
+ 
++void LibraryControl::slotRestartHold(int deck, double v) {
++    if (v > 0) {
++        if (m_restartHoldDeck != 0 || m_restartTriggered) {
++            return; // one hold at a time; nothing more once the restart fired
++        }
++        m_restartHoldDeck = deck;
++        m_restartFlashOn = false;
++        m_lastRestartFlashToggleMs = 0;
++        m_restartElapsed.start();
++        m_restartFlashTimer.start();
++        return;
++    }
++    if (m_restartHoldDeck != deck) {
++        return; // restart already fired at 7s, or stray release
++    }
++    // Released early: cancel. The track load itself happened on press via
++    // the button's LoadSelectedTrack connection, untouched by this gesture.
++    m_restartFlashTimer.stop();
++    m_restartHoldDeck = 0;
++    m_restartFlashOn = false;
++    updateLoadFlashControls();
++}
++
++void LibraryControl::slotRestartFlashTick() {
++    if (m_restartHoldDeck == 0) {
++        m_restartFlashTimer.stop();
++        return;
++    }
++    const qint64 elapsed = m_restartElapsed.elapsed();
++    if (elapsed >= 7000) {
++        m_restartFlashTimer.stop();
++        m_restartHoldDeck = 0;
++        m_restartFlashOn = false;
++        updateLoadFlashControls();
++        triggerRestart();
++        return;
++    }
++    if (elapsed < 600) {
++        return; // ordinary load taps must not flicker
++    }
++    // Flash toggle interval shrinks linearly 250ms -> 80ms over the hold,
++    // the same feel as the USB eject hold.
++    const qint64 interval = qMax<qint64>(80,
++            250 - (250 - 80) * (elapsed - 600) / (7000 - 600));
++    if (m_lastRestartFlashToggleMs == 0 ||
++            elapsed - m_lastRestartFlashToggleMs >= interval) {
++        m_restartFlashOn = !m_restartFlashOn;
++        m_lastRestartFlashToggleMs = elapsed;
++        updateLoadFlashControls();
++    }
++}
++
++void LibraryControl::updateLoadFlashControls() {
++    m_pLoadFlash1->setAndConfirm(
++            (m_restartHoldDeck == 1 && m_restartFlashOn) ? 1.0 : 0.0);
++    m_pLoadFlash2->setAndConfirm(
++            (m_restartHoldDeck == 2 && m_restartFlashOn) ? 1.0 : 0.0);
++}
++
++void LibraryControl::triggerRestart() {
++    if (m_restartTriggered) {
++        return;
++    }
++    m_restartTriggered = true;
++    showBanner(m_pRestarting.get());
++    // Relaunch with the same binary and arguments this instance was started
++    // with, single-quoted for the shell.
++    QStringList parts = QCoreApplication::arguments();
++    if (!parts.isEmpty()) {
++        parts[0] = QCoreApplication::applicationFilePath();
++    } else {
++        parts << QStringLiteral("mixxx");
++    }
++    QStringList quoted;
++    for (const QString& part : std::as_const(parts)) {
++        quoted << QChar('\'') +
++                        QString(part).replace(QChar('\''),
++                                QStringLiteral("'\\''")) +
++                        QChar('\'');
++    }
++    // The helper is startDetached'ed into its own session, so it survives
++    // the killall it performs. SIGTERM first for a clean shutdown (library
++    // DB flush); SIGKILL only if Mixxx is still up after 10s — a truly
++    // wedged instance won't honour TERM.
++    const QString script = QStringLiteral(
++            "sleep 1; killall mixxx; "
++            "n=0; while [ $n -lt 40 ] && pgrep -x mixxx >/dev/null; do "
++            "sleep 0.25; n=$((n+1)); done; "
++            "if pgrep -x mixxx >/dev/null; then killall -9 mixxx; sleep 1; fi; "
++            "[ -n \"$DISPLAY\" ] || export DISPLAY=:0; "
++            "exec ") +
++            quoted.join(QChar(' '));
++    qWarning() << "Hold-to-restart: killing and relaunching Mixxx:" << script;
++    QProcess::startDetached(QStringLiteral("/bin/sh"),
++            QStringList() << QStringLiteral("-c") << script);
++}
++
+ bool LibraryControl::isUsbInUse(int usbIndex) const {
+     // A deck blocks the eject only while it is actively playing a track from
+     // this stick. Paused decks with a loaded track do not hold it (mirroring
+@@ -1423,6 +1553,7 @@ void LibraryControl::clearBanners() {
+     m_pUsbLocked->setAndConfirm(0.0);
+     m_pUsbEjectFailed->setAndConfirm(0.0);
+     m_pLoadBlocked->setAndConfirm(0.0);
++    m_pRestarting->setAndConfirm(0.0);
+ }
+ 
+ void LibraryControl::updateUsbStateControls() {

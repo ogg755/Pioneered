@@ -79,3 +79,21 @@
     Audio-taper pot, so unity stays at knob centre; only the top extends.
     Touches `src/engine/enginemixer.cpp`. If the physical HEADPHONES LEVEL
     knob is re-mapped to headGain, scale it to the new x31.6 max.
+11. `hold-to-restart.patch` (added 2026-07-19) — keyboard-free recovery:
+    holding either on-screen LOAD button for 7 s restarts Mixxx. The skin's
+    LOAD buttons press `[Library],restart_hold_1/2` alongside
+    `LoadSelectedTrack` (which still loads on press, unchanged);
+    `LibraryControl` runs the hold with the same accelerating 250→80 ms
+    flash as the USB eject hold (display control `[Library],load_flash_1/2`,
+    0 normal / 1 flash-white), shows a `[Library],restarting` banner
+    ("RESTARTING MIXXX…"), then `QProcess::startDetached`s a `/bin/sh`
+    helper that survives the kill: `killall mixxx` (SIGTERM, clean library
+    flush), up to 10 s wait, `killall -9` fallback, then relaunches with
+    the original binary path + argv (quoted), exporting `DISPLAY=:0` if
+    unset. Releasing before 7 s cancels; the first 600 ms never flash so
+    normal load taps don't flicker. Only recovers *soft* hangs — if the Qt
+    event loop is fully wedged the button can't fire (an external watchdog
+    would be needed for that). Touches `src/library/librarycontrol.{h,cpp}`.
+    Skin side (same release): `templates/load_button.xml` (2 states + new
+    connections), `style.qss` (white flash + banner style), `skin.xml`
+    (RestartingBanner overlay).

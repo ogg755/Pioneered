@@ -142,6 +142,23 @@
 						<BindProperty>visible</BindProperty>
 					</Connection>
 				</WidgetGroup>
+				<WidgetGroup>
+					<ObjectName>PopupOverlay</ObjectName>
+					<Layout>vertical</Layout>
+					<SizePolicy>me,me</SizePolicy>
+					<TransparentForMouseEvents>true</TransparentForMouseEvents>
+					<Children>
+						<Label>
+							<ObjectName>RestartingBanner</ObjectName>
+							<Text>RESTARTING MIXXX…</Text>
+							<Size>480f,90f</Size>
+						</Label>
+					</Children>
+					<Connection>
+						<ConfigKey persist="false">[Library],restarting</ConfigKey>
+						<BindProperty>visible</BindProperty>
+					</Connection>
+				</WidgetGroup>
 
 				<WidgetGroup>
 					<Layout>vertical</Layout>

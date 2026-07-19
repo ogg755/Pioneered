@@ -2,15 +2,33 @@
   <PushButton>
     <ObjectName>LoadDeck<Variable name="channel"/></ObjectName>
     <Size>110f,0me</Size>
-    <NumberStates>1</NumberStates>
+    <NumberStates>2</NumberStates>
     <State>
       <Number>0</Number>
       <Text>LOAD <Variable name="channel"/></Text>
     </State>
+    <State>
+      <Number>1</Number>
+      <Text>LOAD <Variable name="channel"/></Text>
+    </State>
     <Connection>
       <ConfigKey>[Channel<Variable name="channel"/>],LoadSelectedTrack</ConfigKey>
+      <ConnectValueToWidget>false</ConnectValueToWidget>
       <EmitOnPressAndRelease>true</EmitOnPressAndRelease>
       <ButtonState>LeftButton</ButtonState>
+    </Connection>
+    <!-- Hold-to-restart (patched Mixxx): holding LOAD 7s restarts Mixxx.
+         The gesture logic lives in LibraryControl; load_flash drives the
+         accelerating white blink. Unpatched Mixxx ignores both controls. -->
+    <Connection>
+      <ConfigKey persist="false">[Library],restart_hold_<Variable name="channel"/></ConfigKey>
+      <ConnectValueToWidget>false</ConnectValueToWidget>
+      <EmitOnPressAndRelease>true</EmitOnPressAndRelease>
+      <ButtonState>LeftButton</ButtonState>
+    </Connection>
+    <Connection>
+      <ConfigKey persist="false">[Library],load_flash_<Variable name="channel"/></ConfigKey>
+      <ConnectValueFromWidget>false</ConnectValueFromWidget>
     </Connection>
   </PushButton>
 </Template>

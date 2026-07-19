@@ -358,7 +358,7 @@ WLabel {
 }
 
 /* Centered popup banners (stacked overlay in skin.xml) */
-#UsbLockedBanner, #UsbEjectFailedBanner, #LoadBlockedBanner {
+#UsbLockedBanner, #UsbEjectFailedBanner, #LoadBlockedBanner, #RestartingBanner {
   background-color: #b6294c;
   border: 2px solid white;
   border-radius: 8px;
@@ -390,6 +390,19 @@ WLabel {
 #LoadDeck2 {
   background-color: #5c1120;
   border: 2px solid #d73535;
+}
+
+/* Hold-to-restart flash (value driven by [Library],load_flash_N) */
+#LoadDeck1[value="1"] {
+  background-color: white;
+  border: 2px solid white;
+  color: #112f5c;
+}
+
+#LoadDeck2[value="1"] {
+  background-color: white;
+  border: 2px solid white;
+  color: #5c1120;
 }
 
 /************************************************************************/

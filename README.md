@@ -53,6 +53,9 @@ auto-mount layer (`pi/`), and prebuilt arm64 packages.
 * **Reliability**
   * Hardened rekordbox database parser: corrupt/truncated `EXPORT.PDB` files
     (e.g. from pulling a stick mid-write) can no longer crash Mixxx
+  * **Hold-to-restart**: hold either on-screen LOAD button for 7 s (it blinks
+    faster and faster, like the USB eject hold) to kill and relaunch Mixxx —
+    recover a misbehaving session from the touchscreen, no keyboard needed
 
 ## Requirements
 
