@@ -1,0 +1,141 @@
+<Template>
+  <!-- Settings panel, centered by the full-screen overlay in skin.xml while
+       [Skin],show_settings is 1. Opening it does not touch playback: this is
+       a skin overlay, so a set keeps running underneath it.
+
+       POWER OFF and RESTART are tap-again-to-confirm. Each is two buttons
+       sharing a row, only one visible at a time: the safe face while
+       [Library],arm_power / arm_restart is 0, the red "TAP AGAIN" face while
+       it is 1. Both faces press the same control - LibraryControl decides
+       whether a press arms or commits, and disarms again after 5s. The
+       trigger buttons follow templates/load_button.xml: value comes from the
+       skin, not the control, and press/release emit 1/0.
+
+       Unpatched Mixxx has none of the [Library] controls below, so the panel
+       degrades to an inert BACK button rather than misbehaving. -->
+  <WidgetGroup>
+    <ObjectName>SettingsPanel</ObjectName>
+    <Layout>vertical</Layout>
+    <Size>460f,290f</Size>
+    <Children>
+      <Label>
+        <ObjectName>SettingsTitle</ObjectName>
+        <Text>SETTINGS</Text>
+        <Size>0me,36f</Size>
+      </Label>
+
+      <WidgetGroup>
+        <ObjectName>SettingsRow</ObjectName>
+        <Layout>vertical</Layout>
+        <Size>0me,64f</Size>
+        <Children>
+          <PushButton>
+            <ObjectName>SettingsPowerOff</ObjectName>
+            <SizePolicy>me,me</SizePolicy>
+            <NumberStates>2</NumberStates>
+            <State><Number>0</Number><Text>POWER OFF</Text></State>
+            <State><Number>1</Number><Text>POWER OFF</Text></State>
+            <Connection>
+              <ConfigKey persist="false">[Library],menu_power</ConfigKey>
+              <ConnectValueToWidget>false</ConnectValueToWidget>
+              <EmitOnPressAndRelease>true</EmitOnPressAndRelease>
+              <ButtonState>LeftButton</ButtonState>
+            </Connection>
+            <Connection>
+              <ConfigKey persist="false">[Library],arm_power</ConfigKey>
+              <BindProperty>visible</BindProperty>
+              <Transform><Not/></Transform>
+            </Connection>
+          </PushButton>
+          <PushButton>
+            <ObjectName>SettingsPowerOffArmed</ObjectName>
+            <SizePolicy>me,me</SizePolicy>
+            <NumberStates>2</NumberStates>
+            <State><Number>0</Number><Text>TAP AGAIN TO POWER OFF</Text></State>
+            <State><Number>1</Number><Text>TAP AGAIN TO POWER OFF</Text></State>
+            <Connection>
+              <ConfigKey persist="false">[Library],menu_power</ConfigKey>
+              <ConnectValueToWidget>false</ConnectValueToWidget>
+              <EmitOnPressAndRelease>true</EmitOnPressAndRelease>
+              <ButtonState>LeftButton</ButtonState>
+            </Connection>
+            <Connection>
+              <ConfigKey persist="false">[Library],arm_power</ConfigKey>
+              <BindProperty>visible</BindProperty>
+            </Connection>
+          </PushButton>
+        </Children>
+      </WidgetGroup>
+
+      <WidgetGroup>
+        <ObjectName>SettingsRow</ObjectName>
+        <Layout>vertical</Layout>
+        <Size>0me,64f</Size>
+        <Children>
+          <PushButton>
+            <ObjectName>SettingsRestart</ObjectName>
+            <SizePolicy>me,me</SizePolicy>
+            <NumberStates>2</NumberStates>
+            <State><Number>0</Number><Text>RESTART MIXXX</Text></State>
+            <State><Number>1</Number><Text>RESTART MIXXX</Text></State>
+            <Connection>
+              <ConfigKey persist="false">[Library],menu_restart</ConfigKey>
+              <ConnectValueToWidget>false</ConnectValueToWidget>
+              <EmitOnPressAndRelease>true</EmitOnPressAndRelease>
+              <ButtonState>LeftButton</ButtonState>
+            </Connection>
+            <Connection>
+              <ConfigKey persist="false">[Library],arm_restart</ConfigKey>
+              <BindProperty>visible</BindProperty>
+              <Transform><Not/></Transform>
+            </Connection>
+          </PushButton>
+          <PushButton>
+            <ObjectName>SettingsRestartArmed</ObjectName>
+            <SizePolicy>me,me</SizePolicy>
+            <NumberStates>2</NumberStates>
+            <State><Number>0</Number><Text>TAP AGAIN TO RESTART</Text></State>
+            <State><Number>1</Number><Text>TAP AGAIN TO RESTART</Text></State>
+            <Connection>
+              <ConfigKey persist="false">[Library],menu_restart</ConfigKey>
+              <ConnectValueToWidget>false</ConnectValueToWidget>
+              <EmitOnPressAndRelease>true</EmitOnPressAndRelease>
+              <ButtonState>LeftButton</ButtonState>
+            </Connection>
+            <Connection>
+              <ConfigKey persist="false">[Library],arm_restart</ConfigKey>
+              <BindProperty>visible</BindProperty>
+            </Connection>
+          </PushButton>
+        </Children>
+      </WidgetGroup>
+
+      <WidgetGroup>
+        <ObjectName>SettingsRow</ObjectName>
+        <Layout>vertical</Layout>
+        <Size>0me,64f</Size>
+        <Children>
+          <PushButton>
+            <ObjectName>SettingsBack</ObjectName>
+            <SizePolicy>me,me</SizePolicy>
+            <NumberStates>2</NumberStates>
+            <State><Number>0</Number><Text>BACK</Text></State>
+            <State><Number>1</Number><Text>BACK</Text></State>
+            <!-- show_settings is 1 while the panel is open, so this toggle
+                 press takes it to 0 and closes the panel. -->
+            <Connection>
+              <ConfigKey persist="false">[Skin],show_settings</ConfigKey>
+              <ButtonState>LeftButton</ButtonState>
+            </Connection>
+            <Connection>
+              <ConfigKey persist="false">[Library],menu_disarm</ConfigKey>
+              <ConnectValueToWidget>false</ConnectValueToWidget>
+              <EmitOnPressAndRelease>true</EmitOnPressAndRelease>
+              <ButtonState>LeftButton</ButtonState>
+            </Connection>
+          </PushButton>
+        </Children>
+      </WidgetGroup>
+    </Children>
+  </WidgetGroup>
+</Template>

@@ -97,3 +97,30 @@
     Skin side (same release): `templates/load_button.xml` (2 states + new
     connections), `style.qss` (white flash + banner style), `skin.xml`
     (RestartingBanner overlay).
+12. `system-menu.patch` (added 2026-08-04) — on-screen settings menu behind a
+    cog in the topbar. `LibraryControl` gains `[Library],menu_power`,
+    `menu_restart`, `menu_disarm` (push, 1 on press / 0 on release) and the
+    display controls `arm_power` / `arm_restart`, which drive the skin's red
+    "TAP AGAIN TO …" button faces. First press arms, second commits; arming
+    one option disarms the other, BACK and the cog press `menu_disarm`, and a
+    5 s single-shot timer disarms both so a menu left open never leaves a live
+    one-tap kill on screen. Restart reuses `triggerRestart()` from
+    `hold-to-restart.patch` — one implementation, two entry points. Power off
+    runs `systemctl poweroff || sudo -n poweroff || sudo -n shutdown -h now`
+    via `QProcess` (logind/polkit normally grants a local session this with no
+    sudo rule; the fallback is the same passwordless sudo the USB eject uses),
+    showing `[Library],powering_off` and, if every route is refused,
+    `power_off_failed`. Note `systemctl` returns 0 as soon as the job is
+    queued, so exit 0 means "accepted", not "finished". Touches
+    `src/library/librarycontrol.{h,cpp}`.
+    Skin side (same release): new `settings.xml` panel template, `topbar.xml`
+    (expanding `TabSpacer` + `SettingsCog`, so the cog pins to the corner and
+    the tabs keep their rendered width), `skin.xml` (`SettingsOverlay` — the
+    one overlay deliberately *not* `TransparentForMouseEvents`, which is what
+    makes it modal — plus the two new banners and the `[Skin],show_settings`
+    attribute), `style.qss`.
+
+    Both CI workflows apply the series above. `publish-release.yml` had
+    silently drifted, applying only patches 1-9 — releases cut from it shipped
+    without the headphone gain ceiling or hold-to-restart. Resynced with
+    `build-mixxx-deb.yml` in the same commit as this patch.

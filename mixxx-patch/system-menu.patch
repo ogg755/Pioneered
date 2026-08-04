@@ -1,0 +1,220 @@
+Description: On-screen settings menu (cog) with power off and restart
+ On the XDJ400 the touchscreen is the only input device: there is no
+ keyboard, no mouse and no desktop shell behind Mixxx. Shutting the unit
+ down cleanly meant sshing in, and hold-to-restart (holding a LOAD button
+ for 7s) is a recovery gesture, not something you would explain to anyone
+ else using the deck.
+ .
+ This adds the controls behind a settings panel the skin opens from a cog
+ in the topbar. POWER OFF and RESTART are tap-again-to-confirm: the first
+ press sets arm_power / arm_restart, which the skin uses to swap the
+ button for a red "TAP AGAIN TO ..." face; the second press commits.
+ Arming one option disarms the other, BACK and the cog press menu_disarm,
+ and a 5s timer disarms both -- a menu left open mid-set never leaves a
+ live one-tap kill on screen.
+ .
+ Restart reuses triggerRestart() from the hold-to-restart patch, so both
+ routes share one implementation. Power off runs "systemctl poweroff",
+ falling back to passwordless sudo (the same mechanism the USB eject
+ already uses) for setups where logind/polkit will not grant the session
+ the right; if every route is refused a POWER OFF FAILED banner says so
+ instead of leaving the operator tapping a dead button.
+ .
+ Playback is deliberately untouched by opening the menu -- the panel is a
+ skin overlay, so a set keeps running while it is open.
+Author: Pioneered CI <pioneered-build@localhost>
+Forwarded: no
+
+diff --git a/src/library/librarycontrol.h b/src/library/librarycontrol.h
+--- a/src/library/librarycontrol.h
++++ b/src/library/librarycontrol.h
+@@ -149,6 +149,17 @@
+     void updateLoadFlashControls();
+     void triggerRestart();
+ 
++    // Pioneered settings menu (cog button in the topbar). POWER OFF and
++    // RESTART are tap-again-to-confirm: the first press arms the option,
++    // flipping arm_power/arm_restart so the skin shows the red "TAP AGAIN"
++    // face, and the second press commits. Arming one option disarms the
++    // other, and a 5s timer disarms both, so a menu left open on stage
++    // never leaves a live one-tap kill sitting on screen.
++    void slotMenuPower(double v);
++    void slotMenuRestart(double v);
++    void disarmSystemMenu();
++    void triggerPowerOff();
++
+     // On-screen-keyboard search input helpers (drive the bound searchbox).
+     void appendToSearch(const QString& text);
+     void backspaceSearch();
+@@ -187,6 +198,17 @@
+     bool m_restartFlashOn = false;
+     bool m_restartTriggered = false;
+ 
++    // Settings menu state (see slotMenuPower above).
++    std::unique_ptr<ControlPushButton> m_pMenuPower;
++    std::unique_ptr<ControlPushButton> m_pMenuRestart;
++    std::unique_ptr<ControlPushButton> m_pMenuDisarm;
++    std::unique_ptr<ControlPushButton> m_pArmPower;
++    std::unique_ptr<ControlPushButton> m_pArmRestart;
++    std::unique_ptr<ControlPushButton> m_pPoweringOff;
++    std::unique_ptr<ControlPushButton> m_pPowerOffFailed;
++    QTimer m_disarmTimer;
++    bool m_powerOffTriggered = false;
++
+     Library* m_pLibrary;
+ 
+     // Simulate pressing a key on the keyboard
+diff --git a/src/library/librarycontrol.cpp b/src/library/librarycontrol.cpp
+--- a/src/library/librarycontrol.cpp
++++ b/src/library/librarycontrol.cpp
+@@ -322,6 +322,51 @@
+             this,
+             &LibraryControl::slotRestartFlashTick);
+ 
++    // Pioneered settings menu: the cog panel's POWER OFF / RESTART buttons
++    // press menu_power / menu_restart. The first press arms (arm_power /
++    // arm_restart flip the skin to the red "TAP AGAIN" face), the second
++    // commits; BACK and the cog press menu_disarm to clear both, as does
++    // the 5s disarm timer.
++    m_pArmPower = std::make_unique<ControlPushButton>(
++            ConfigKey("[Library]", "arm_power"));
++    m_pArmPower->setStates(2);
++    m_pArmRestart = std::make_unique<ControlPushButton>(
++            ConfigKey("[Library]", "arm_restart"));
++    m_pArmRestart->setStates(2);
++    m_pMenuPower = std::make_unique<ControlPushButton>(
++            ConfigKey("[Library]", "menu_power"));
++    m_pMenuPower->connectValueChangeRequest(this,
++            [this](double value) {
++                m_pMenuPower->setAndConfirm(value);
++                slotMenuPower(value);
++            });
++    m_pMenuRestart = std::make_unique<ControlPushButton>(
++            ConfigKey("[Library]", "menu_restart"));
++    m_pMenuRestart->connectValueChangeRequest(this,
++            [this](double value) {
++                m_pMenuRestart->setAndConfirm(value);
++                slotMenuRestart(value);
++            });
++    m_pMenuDisarm = std::make_unique<ControlPushButton>(
++            ConfigKey("[Library]", "menu_disarm"));
++    m_pMenuDisarm->connectValueChangeRequest(this,
++            [this](double value) {
++                m_pMenuDisarm->setAndConfirm(value);
++                if (value > 0.0) {
++                    disarmSystemMenu();
++                }
++            });
++    m_pPoweringOff = std::make_unique<ControlPushButton>(
++            ConfigKey("[Library]", "powering_off"));
++    m_pPowerOffFailed = std::make_unique<ControlPushButton>(
++            ConfigKey("[Library]", "power_off_failed"));
++    m_disarmTimer.setInterval(5000);
++    m_disarmTimer.setSingleShot(true);
++    connect(&m_disarmTimer,
++            &QTimer::timeout,
++            this,
++            &LibraryControl::disarmSystemMenu);
++
+     m_holdFlashTimer.setInterval(40);
+     connect(&m_holdFlashTimer,
+             &QTimer::timeout,
+@@ -1411,6 +1456,89 @@
+             QStringList() << QStringLiteral("-c") << script);
+ }
+ 
++void LibraryControl::slotMenuPower(double v) {
++    if (v <= 0.0) {
++        return; // arm/commit on press; the release is just the button reset
++    }
++    if (m_pArmPower->get() > 0.0) {
++        disarmSystemMenu();
++        triggerPowerOff();
++        return;
++    }
++    disarmSystemMenu(); // arming one option cancels the other
++    m_pArmPower->setAndConfirm(1.0);
++    m_disarmTimer.start();
++}
++
++void LibraryControl::slotMenuRestart(double v) {
++    if (v <= 0.0) {
++        return;
++    }
++    if (m_pArmRestart->get() > 0.0) {
++        disarmSystemMenu();
++        triggerRestart();
++        return;
++    }
++    disarmSystemMenu();
++    m_pArmRestart->setAndConfirm(1.0);
++    m_disarmTimer.start();
++}
++
++void LibraryControl::disarmSystemMenu() {
++    m_disarmTimer.stop();
++    m_pArmPower->setAndConfirm(0.0);
++    m_pArmRestart->setAndConfirm(0.0);
++}
++
++void LibraryControl::triggerPowerOff() {
++    if (m_powerOffTriggered) {
++        return;
++    }
++    m_powerOffTriggered = true;
++    showBanner(m_pPoweringOff.get());
++    // logind/polkit normally lets the local session power off with no sudo
++    // rule at all; fall back to the same passwordless sudo the USB eject
++    // already relies on, for setups where it does not (no seat, no polkit
++    // agent). systemctl returns as soon as the job is queued, so a 0 exit
++    // means "shutdown accepted", not "shutdown finished".
++    const QString script = QStringLiteral(
++            "systemctl poweroff || sudo -n poweroff || "
++            "sudo -n shutdown -h now");
++    qWarning() << "Settings menu: powering off:" << script;
++    auto* pProcess = new QProcess(this);
++    connect(pProcess,
++            QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
++            this,
++            [this, pProcess](int exitCode, QProcess::ExitStatus exitStatus) {
++                pProcess->deleteLater();
++                if (exitStatus == QProcess::NormalExit && exitCode == 0) {
++                    return; // shutdown under way; the banner rides it out
++                }
++                const QString errorOutput = QString::fromUtf8(
++                        pProcess->readAllStandardError())
++                                                    .trimmed();
++                qWarning() << "poweroff failed:" << errorOutput;
++                // Every route refused: re-arm so the operator can retry,
++                // and say so rather than leaving them tapping a dead button.
++                m_powerOffTriggered = false;
++                showBanner(m_pPowerOffFailed.get());
++            });
++    connect(pProcess,
++            &QProcess::errorOccurred,
++            this,
++            [this, pProcess](QProcess::ProcessError error) {
++                // finished() never fires for a process that failed to start;
++                // without this the menu would sit on POWERING OFF forever
++                if (error == QProcess::FailedToStart) {
++                    pProcess->deleteLater();
++                    m_powerOffTriggered = false;
++                    showBanner(m_pPowerOffFailed.get());
++                }
++            });
++    pProcess->start(QStringLiteral("/bin/sh"),
++            {QStringLiteral("-c"), script});
++}
++
+ bool LibraryControl::isUsbInUse(int usbIndex) const {
+     // A deck blocks the eject only while it is actively playing a track from
+     // this stick. Paused decks with a loaded track do not hold it (mirroring
+@@ -1554,6 +1682,8 @@
+     m_pUsbEjectFailed->setAndConfirm(0.0);
+     m_pLoadBlocked->setAndConfirm(0.0);
+     m_pRestarting->setAndConfirm(0.0);
++    m_pPoweringOff->setAndConfirm(0.0);
++    m_pPowerOffFailed->setAndConfirm(0.0);
+ }
+ 
+ void LibraryControl::updateUsbStateControls() {

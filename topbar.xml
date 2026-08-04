@@ -21,6 +21,33 @@
             <SetVariable name="tab_name">Search</SetVariable>
             <SetVariable name="config_key">search</SetVariable>
           </Template>
+          <!-- Expanding spacer, so the cog pins to the right corner and the
+               tabs keep the width they already render at (style.qss caps
+               them via max-width). All surplus lands here rather than being
+               shared out, so adding the cog does not resize the tabs; below
+               ~800px the spacer collapses first and the tabs shrink as they
+               always did. -->
+          <WidgetGroup>
+            <ObjectName>TabSpacer</ObjectName>
+            <Layout>horizontal</Layout>
+            <SizePolicy>me,me</SizePolicy>
+          </WidgetGroup>
+          <PushButton>
+            <ObjectName>SettingsCog</ObjectName>
+            <Size>56f,0me</Size>
+            <NumberStates>2</NumberStates>
+            <State><Number>0</Number><Text>&#9881;</Text></State>
+            <State><Number>1</Number><Text>&#9881;</Text></State>
+            <Connection>
+              <ConfigKey persist="false">[Skin],show_settings</ConfigKey>
+              <ButtonState>LeftButton</ButtonState>
+            </Connection>
+            <!-- Closing (or reopening) the panel clears any armed confirm. -->
+            <Connection>
+              <ConfigKey persist="false">[Library],menu_disarm</ConfigKey>
+              <ButtonState>LeftButton</ButtonState>
+            </Connection>
+          </PushButton>
         </Children>
       </WidgetGroup>
     </Children>

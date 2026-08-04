@@ -16,6 +16,7 @@
 			<attribute persist="true" config_key="[PreviewDeck],show_previewdeck">0</attribute>
 			<attribute persist="true" config_key="[Library],show_coverart">0</attribute>
 			<attribute persist="false" config_key="[Skin],show_keyboard">1</attribute>
+			<attribute persist="false" config_key="[Skin],show_settings">0</attribute>
 		</attributes>
 	</manifest>
 
@@ -156,6 +157,61 @@
 					</Children>
 					<Connection>
 						<ConfigKey persist="false">[Library],restarting</ConfigKey>
+						<BindProperty>visible</BindProperty>
+					</Connection>
+				</WidgetGroup>
+				<WidgetGroup>
+					<ObjectName>PopupOverlay</ObjectName>
+					<Layout>vertical</Layout>
+					<SizePolicy>me,me</SizePolicy>
+					<TransparentForMouseEvents>true</TransparentForMouseEvents>
+					<Children>
+						<Label>
+							<ObjectName>PoweringOffBanner</ObjectName>
+							<Text>POWERING OFF…</Text>
+							<Size>480f,90f</Size>
+						</Label>
+					</Children>
+					<Connection>
+						<ConfigKey persist="false">[Library],powering_off</ConfigKey>
+						<BindProperty>visible</BindProperty>
+					</Connection>
+				</WidgetGroup>
+				<WidgetGroup>
+					<ObjectName>PopupOverlay</ObjectName>
+					<Layout>vertical</Layout>
+					<SizePolicy>me,me</SizePolicy>
+					<TransparentForMouseEvents>true</TransparentForMouseEvents>
+					<Children>
+						<Label>
+							<ObjectName>PowerOffFailedBanner</ObjectName>
+							<Text>POWER OFF FAILED</Text>
+							<Size>480f,90f</Size>
+						</Label>
+					</Children>
+					<Connection>
+						<ConfigKey persist="false">[Library],power_off_failed</ConfigKey>
+						<BindProperty>visible</BindProperty>
+					</Connection>
+				</WidgetGroup>
+
+				<!-- Settings panel (cog in the topbar). Listed after the
+				     banners so they still render above it, but before the
+				     main UI so it covers the decks. Deliberately NOT
+				     TransparentForMouseEvents: unlike the banners this layer
+				     has to receive taps, and swallowing the ones outside the
+				     panel is what makes it modal - no reaching a deck
+				     control by accident while the menu is open. Playback is
+				     untouched; only input is blocked. -->
+				<WidgetGroup>
+					<ObjectName>SettingsOverlay</ObjectName>
+					<Layout>vertical</Layout>
+					<SizePolicy>me,me</SizePolicy>
+					<Children>
+						<Template src="skin:settings.xml"/>
+					</Children>
+					<Connection>
+						<ConfigKey persist="false">[Skin],show_settings</ConfigKey>
 						<BindProperty>visible</BindProperty>
 					</Connection>
 				</WidgetGroup>

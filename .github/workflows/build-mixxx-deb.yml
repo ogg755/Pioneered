@@ -35,6 +35,7 @@ jobs:
           patch -p1 < "$GITHUB_WORKSPACE/mixxx-patch/banner-overlay-transparency.patch"
           patch -p1 < "$GITHUB_WORKSPACE/mixxx-patch/headphone-gain-ceiling.patch"
           patch -p1 < "$GITHUB_WORKSPACE/mixxx-patch/hold-to-restart.patch"
+          patch -p1 < "$GITHUB_WORKSPACE/mixxx-patch/system-menu.patch"
           DEBEMAIL=pioneered-build@localhost DEBFULLNAME="Pioneered CI" \
             dch --local "+usbbrowse.r${GITHUB_RUN_NUMBER}." "Pioneered USB browse/eject patch build ${GITHUB_RUN_NUMBER}"
 

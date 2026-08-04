@@ -56,6 +56,19 @@ auto-mount layer (`pi/`), and prebuilt arm64 packages.
   * **Hold-to-restart**: hold either on-screen LOAD button for 7 s (it blinks
     faster and faster, like the USB eject hold) to kill and relaunch Mixxx —
     recover a misbehaving session from the touchscreen, no keyboard needed
+* **On-screen settings menu**
+  * Cog button in the top-right corner opens a centered settings panel with
+    **Power off**, **Restart Mixxx** and **Back** — shut the unit down cleanly
+    without a keyboard or an ssh session
+  * Both actions are **tap-again-to-confirm**: the first tap turns the button
+    red ("TAP AGAIN TO …"), a second tap commits, and it disarms itself after
+    5 s. Back never asks.
+  * Opening the menu does **not** interrupt playback — a set keeps running
+    underneath, though the panel blocks taps so you cannot hit a deck control
+    by accident while it is open
+  * Power off uses `systemctl poweroff`, falling back to passwordless `sudo`
+    (the same rule the USB eject relies on); if both are refused you get a
+    POWER OFF FAILED banner rather than a dead button
 
 ## Requirements
 

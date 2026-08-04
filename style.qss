@@ -358,7 +358,8 @@ WLabel {
 }
 
 /* Centered popup banners (stacked overlay in skin.xml) */
-#UsbLockedBanner, #UsbEjectFailedBanner, #LoadBlockedBanner, #RestartingBanner {
+#UsbLockedBanner, #UsbEjectFailedBanner, #LoadBlockedBanner, #RestartingBanner,
+#PoweringOffBanner, #PowerOffFailedBanner {
   background-color: #b6294c;
   border: 2px solid white;
   border-radius: 8px;
@@ -503,6 +504,80 @@ WBeatSpinBox::up-button {
 #TabControls WPushButton[value="1"] {
   border: 2px solid #c3d541;
   color: #c3d541;
+}
+
+/* The cog sits in the corner past an expanding spacer, so it must opt out
+   of the tab margins/max-width above or it would be pushed off the edge.
+   No border box: it reads as a corner control, not a fourth tab. Selectors
+   are two-ID so they outrank #TabControls WPushButton[value="..."] above,
+   which would otherwise repaint the cog as a tab. */
+#TabSpacer {
+  background-color: black;
+}
+
+#TabControls #SettingsCog {
+  background-color: black;
+  border: none;
+  color: gray;
+  font-size: 26px;
+  margin: 6px 8px 6px 0;
+  max-width: 56px;
+  padding: 0;
+}
+
+#TabControls #SettingsCog[value="1"] {
+  color: #c3d541;
+}
+
+/************************************************************************/
+/*     Settings panel                                                   */
+/************************************************************************/
+
+/* Full-screen modal layer behind the panel: dark, but not opaque, so it
+   stays obvious that a set is still running underneath. */
+#SettingsOverlay {
+  background-color: rgba(0, 0, 0, 200);
+}
+
+#SettingsPanel {
+  background-color: #32323c;
+  border: 2px solid #c3d541;
+  border-radius: 8px;
+  padding: 8px;
+}
+
+#SettingsTitle {
+  color: #c3d541;
+  font-size: 18px;
+  font-weight: bold;
+  qproperty-alignment: AlignCenter;
+  text-transform: uppercase;
+}
+
+/* Two-ID selectors throughout, so the per-button rules outrank this
+   descendant one rather than losing to it on specificity. */
+#SettingsPanel WPushButton {
+  border-radius: 4px;
+  font-size: 18px;
+  font-weight: bold;
+  margin: 6px 10px;
+}
+
+#SettingsPanel #SettingsPowerOff,
+#SettingsPanel #SettingsRestart,
+#SettingsPanel #SettingsBack {
+  background-color: black;
+  border: 2px solid gray;
+  color: white;
+}
+
+/* Armed faces: red fill, so a live one-tap commit never looks like the
+   safe state it replaced. */
+#SettingsPanel #SettingsPowerOffArmed,
+#SettingsPanel #SettingsRestartArmed {
+  background-color: #b6294c;
+  border: 2px solid white;
+  color: white;
 }
 
 /************************************************************************/
