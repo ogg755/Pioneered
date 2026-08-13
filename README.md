@@ -139,8 +139,9 @@ automatically.
 
 ## Using the console
 
-* **Short-press USB A/B**: browse that stick (first press after inserting a
-  stick primes the scan — press again). **Hold ~5 s**: eject; safe to pull when
+* **Short-press USB A/B**: browse that stick — one press, even on a stick you
+  just plugged in (the press waits out the device scan and opens the stick as
+  soon as it appears). **Hold ~5 s**: eject; safe to pull when
   its playlists disappear. "USB LOCKED" means a deck is *playing* from that
   stick — pause it first.
 * **Key traffic light**: green Key cells are harmonically compatible with the

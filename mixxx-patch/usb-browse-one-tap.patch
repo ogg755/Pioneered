@@ -1,0 +1,296 @@
+Description: One-tap USB browse, and stop dropping taps during a PDB parse
+ 1. USB A/B needed two presses on a freshly inserted stick. The rekordbox
+    device list only refreshes on activation, so the first press kicked off an
+    async QtConcurrent device scan and returned empty-handed -- doing nothing
+    visible -- and only a second press, after the scan had landed, actually
+    navigated. This was the most visible "not snappy" moment in the product:
+    the appliance looked broken on the very first interaction after boot.
+ .
+    A press that cannot find its device now records the slot it wanted and
+    completes itself from the sidebar model's rowsInserted/modelReset signal
+    as soon as the scan reports the stick. The retry deliberately does not
+    re-prime the scan (that would restart it on every batch of inserted rows),
+    a new press or an eject supersedes any pending request, and a 10 s
+    single-shot timeout drops a request for a stick that never appears so it
+    can never navigate the sidebar much later.
+ .
+ 2. Tapping a device while a previous PDB parse was still running was silently
+    discarded -- correct for the race it guards (concurrent parses would race
+    on the shared TreeItem), but on a slow stick that is seconds of UI that
+    ignores you with no feedback and no retry. The activation is now queued as
+    a QPersistentModelIndex and re-dispatched from onTracksFound() through the
+    event loop, so it runs once the future has settled. The queue slot is
+    cleared before the result is unwrapped, so a failed parse releases it
+    instead of wedging it, and a device removed in the meantime invalidates the
+    index rather than dangling.
+ .
+ Skin side: none -- the USB buttons and their state controls are unchanged.
+ Docs: README.md and docs/pi-deploy.md documented the two-press behaviour and
+ are updated in the same commit.
+Author: Pioneered fork
+Forwarded: no
+
+diff --git a/src/library/librarycontrol.cpp b/src/library/librarycontrol.cpp
+index 3cfa15b..42434e5 100644
+--- a/src/library/librarycontrol.cpp
++++ b/src/library/librarycontrol.cpp
+@@ -379,6 +379,16 @@ LibraryControl::LibraryControl(Library* pLibrary)
+             this,
+             &LibraryControl::clearBanners);
+ 
++    // One-tap USB: give up on a stick that never shows up, so a request armed
++    // now can never navigate the sidebar minutes later. Generous enough to
++    // cover a slow stick's device scan.
++    m_pendingUsbTimer.setSingleShot(true);
++    m_pendingUsbTimer.setInterval(10000);
++    connect(&m_pendingUsbTimer,
++            &QTimer::timeout,
++            this,
++            &LibraryControl::clearPendingUsb);
++
+     // Auto DJ controls
+     m_pAutoDjAddTop = std::make_unique<ControlPushButton>(ConfigKey("[Library]", "AutoDjAddTop"));
+     m_pAutoDjAddTop->addAlias(ConfigKey(
+@@ -1273,6 +1283,9 @@ void LibraryControl::slotUsbButtonPress(int usbIndex) {
+     if (m_holdUsb != 0 || m_ejectRunning) {
+         return; // one hold/eject at a time
+     }
++    // A new press supersedes any browse still waiting on a device scan --
++    // including a pending request for the other slot.
++    clearPendingUsb();
+     m_holdUsb = usbIndex;
+     m_flashOn = false;
+     m_holdLockedBannerShown = false;
+@@ -1559,6 +1572,9 @@ bool LibraryControl::isUsbInUse(int usbIndex) const {
+ }
+ 
+ void LibraryControl::startEject(int usbIndex) {
++    // Ejecting is the opposite of browsing: never let a pending browse fire
++    // for a stick that is on its way out.
++    clearPendingUsb();
+     const QString mountPath = usbMountPath(usbIndex);
+     const QStorageInfo storage(mountPath);
+     if (!storage.isValid() || !storage.isReady() ||
+@@ -1714,10 +1730,17 @@ void LibraryControl::browseToggleUsb(int usbIndex) {
+     const QString deviceName = (usbIndex == 1)
+             ? QStringLiteral("USBA")
+             : QStringLiteral("USBB");
+-    const QModelIndex deviceIndex = findRekordboxDeviceIndex(deviceName);
++    const QModelIndex deviceIndex = findRekordboxDeviceIndex(deviceName, true);
+     if (!deviceIndex.isValid()) {
+-        return; // not mounted / not scanned yet: no-op (retry primes scan)
++        // Not listed yet. findRekordboxDeviceIndex() has kicked off the device
++        // scan; remember what this press wanted so it completes on its own
++        // when the scan reports the stick. This is what makes the first press
++        // after inserting a stick work -- it used to return empty-handed and
++        // require a second press.
++        armPendingUsb(usbIndex);
++        return;
+     }
++    clearPendingUsb();
+     m_pSidebarWidget->setRootIndex(deviceIndex);
+     m_rootedDeviceIndex = QPersistentModelIndex(deviceIndex);
+     m_rootedUsb = usbIndex;
+@@ -1744,7 +1767,66 @@ void LibraryControl::browseToggleUsb(int usbIndex) {
+     updateUsbStateControls();
+ }
+ 
+-QModelIndex LibraryControl::findRekordboxDeviceIndex(const QString& deviceName) {
++void LibraryControl::armPendingUsb(int usbIndex) {
++    SidebarModel* pSidebarModel = m_pLibrary->sidebarModel();
++    VERIFY_OR_DEBUG_ASSERT(pSidebarModel) {
++        return;
++    }
++    m_pendingUsb = usbIndex;
++    // rowsInserted covers the device appearing under the Rekordbox feature;
++    // modelReset covers the feature list being rebuilt wholesale. Both are
++    // UniqueConnection, and slotPendingUsbRetry() is a no-op unless something
++    // is actually pending, so they are harmless once connected.
++    connect(pSidebarModel,
++            &QAbstractItemModel::rowsInserted,
++            this,
++            &LibraryControl::slotPendingUsbRetry,
++            Qt::UniqueConnection);
++    connect(pSidebarModel,
++            &QAbstractItemModel::modelReset,
++            this,
++            &LibraryControl::slotPendingUsbRetry,
++            Qt::UniqueConnection);
++    m_pendingUsbTimer.start();
++}
++
++void LibraryControl::clearPendingUsb() {
++    m_pendingUsb = 0;
++    m_pendingUsbTimer.stop();
++}
++
++void LibraryControl::slotPendingUsbRetry() {
++    if (m_pendingUsb == 0) {
++        return;
++    }
++    // A hold or an eject has taken over since the press: drop the request
++    // rather than yanking the sidebar out from under it.
++    if (m_holdUsb != 0 || m_ejectRunning) {
++        clearPendingUsb();
++        return;
++    }
++    const int usbIndex = m_pendingUsb;
++    if (m_rootedUsb == usbIndex) {
++        // Something else already rooted the sidebar where this press wanted to
++        // go. Completing now would hit browseToggleUsb()'s toggle branch and
++        // un-root it, turning a satisfied request into a surprise.
++        clearPendingUsb();
++        return;
++    }
++    const QString deviceName = (usbIndex == 1)
++            ? QStringLiteral("USBA")
++            : QStringLiteral("USBB");
++    // primeScan = false: this runs from a model signal, and re-triggering the
++    // scan here would restart it on every batch of inserted rows.
++    if (!findRekordboxDeviceIndex(deviceName, false).isValid()) {
++        return; // keep waiting; the timeout gives up eventually
++    }
++    clearPendingUsb();
++    browseToggleUsb(usbIndex);
++}
++
++QModelIndex LibraryControl::findRekordboxDeviceIndex(
++        const QString& deviceName, bool primeScan) {
+     SidebarModel* pSidebarModel = m_pLibrary->sidebarModel();
+     VERIFY_OR_DEBUG_ASSERT(pSidebarModel) {
+         return QModelIndex();
+@@ -1776,15 +1858,18 @@ QModelIndex LibraryControl::findRekordboxDeviceIndex(const QString& deviceName)
+         // in the full tree. Trigger a rescan via the model's clicked()
+         // handler. The scan runs on a worker thread (QtConcurrent) and
+         // onRekordboxDevicesFound applies it incrementally (already-listed
+-        // devices are kept), so this press returns empty-handed and the
+-        // next press finds the device.
+-        pSidebarModel->clicked(featureIndex);
++        // devices are kept), so this call still returns empty-handed -- the
++        // caller arms a pending request and completes when the scan lands.
++        if (primeScan) {
++            pSidebarModel->clicked(featureIndex);
++        }
+         return QModelIndex(); // Rekordbox found but device absent (yet)
+     }
+     return QModelIndex(); // no Rekordbox feature
+ }
+ 
+ void LibraryControl::restoreSidebarRoot() {
++    clearPendingUsb();
+     m_rootedUsb = 0;
+     m_rootedDeviceIndex = QPersistentModelIndex();
+     if (m_pSidebarWidget) {
+diff --git a/src/library/librarycontrol.h b/src/library/librarycontrol.h
+index 4312d3a..6e3dc37 100644
+--- a/src/library/librarycontrol.h
++++ b/src/library/librarycontrol.h
+@@ -136,9 +136,20 @@ class LibraryControl : public QObject {
+     void updateUsbStateControls();
+     void refreshRekordboxDevices();
+     static QString usbMountPath(int usbIndex);
+-    QModelIndex findRekordboxDeviceIndex(const QString& deviceName);
++    /// Locate the sidebar index of a mounted rekordbox device. When
++    /// primeScan is true and the device is absent, an async device rescan is
++    /// kicked off (the scan is what makes a just-inserted stick visible).
++    QModelIndex findRekordboxDeviceIndex(
++            const QString& deviceName, bool primeScan);
+     void restoreSidebarRoot();
+     void validateSidebarRoot();
++    /// Pioneered one-tap USB: a press that arrives before the device scan has
++    /// listed the stick remembers what it wanted here, and completes as soon
++    /// as the scan reports the device, instead of doing nothing and making the
++    /// user press again.
++    void armPendingUsb(int usbIndex);
++    void clearPendingUsb();
++    void slotPendingUsbRetry();
+ 
+     // Pioneered hold-to-restart: the skin's LOAD buttons also press
+     // restart_hold_1/2. Holding either for 7s (accelerating flash, same
+@@ -184,6 +195,11 @@ class LibraryControl : public QObject {
+     int m_ejectAttemptsLeft = 0;
+     QPersistentModelIndex m_rootedDeviceIndex;
+     int m_rootedUsb = 0; // 0 = full tree, 1 = USBA, 2 = USBB
++    // One-tap USB: slot whose browse is waiting on the async device scan
++    // (0 = nothing pending), and the timeout that gives up on a stick that
++    // never appears so a stale request cannot fire much later.
++    int m_pendingUsb = 0;
++    QTimer m_pendingUsbTimer;
+ 
+     // Hold-to-restart state (independent of the USB hold above).
+     std::unique_ptr<ControlPushButton> m_pRestartHold1;
+diff --git a/src/library/rekordbox/rekordboxfeature.cpp b/src/library/rekordbox/rekordboxfeature.cpp
+index 8d994f9..b281262 100644
+--- a/src/library/rekordbox/rekordboxfeature.cpp
++++ b/src/library/rekordbox/rekordboxfeature.cpp
+@@ -1568,8 +1568,13 @@ void RekordboxFeature::activateChild(const QModelIndex& index) {
+         if (m_tracksFuture.isRunning()) {
+             // A previous parse is still running; starting another would race
+             // it on the shared TreeItem (and orphan its result by replacing
+-            // m_tracksFuture). Ignore the activation; retry when done.
+-            qWarning() << "Rekordbox device parse already running, ignoring activation";
++            // m_tracksFuture). Queue this activation instead of discarding it:
++            // dropping it silently meant a tap that landed during a slow
++            // stick's parse did nothing at all, with no feedback and no retry.
++            // onTracksFound() re-dispatches the queued index when the running
++            // parse finishes.
++            qDebug() << "Rekordbox device parse already running, queueing activation";
++            m_queuedActivateChild = QPersistentModelIndex(index);
+             return;
+         }
+ 
+@@ -1670,6 +1675,11 @@ void RekordboxFeature::onTracksFound() {
+     qDebug() << "onTracksFound";
+     m_pSidebarModel->triggerRepaint();
+ 
++    // Take the queued activation before anything can return early, so a failed
++    // parse still releases it rather than wedging the queue.
++    const QPersistentModelIndex queued = m_queuedActivateChild;
++    m_queuedActivateChild = QPersistentModelIndex();
++
+     QString devicePlaylist;
+     try {
+         devicePlaylist = m_tracksFuture.result();
+@@ -1682,4 +1692,19 @@ void RekordboxFeature::onTracksFound() {
+ 
+     m_pRekordboxPlaylistModel->setPlaylist(devicePlaylist);
+     emit showTrackModel(m_pRekordboxPlaylistModel);
++
++    // Re-dispatch the tap that arrived while this parse was running. Queued via
++    // the event loop so m_tracksFuture is settled and activateChild() sees
++    // isRunning() == false; the index is persistent, so a row removed in the
++    // meantime simply invalidates and is skipped.
++    if (queued.isValid()) {
++        QMetaObject::invokeMethod(
++                this,
++                [this, queued] {
++                    if (queued.isValid()) {
++                        activateChild(QModelIndex(queued));
++                    }
++                },
++                Qt::QueuedConnection);
++    }
+ }
+diff --git a/src/library/rekordbox/rekordboxfeature.h b/src/library/rekordbox/rekordboxfeature.h
+index 1f17dff..1ae5976 100644
+--- a/src/library/rekordbox/rekordboxfeature.h
++++ b/src/library/rekordbox/rekordboxfeature.h
+@@ -26,6 +26,7 @@
+ 
+ #include <QFuture>
+ #include <QFutureWatcher>
++#include <QPersistentModelIndex>
+ #include <QStringListModel>
+ #include <QtConcurrentRun>
+ #include <fstream>
+@@ -90,6 +91,10 @@ class RekordboxFeature : public BaseExternalLibraryFeature {
+     QFuture<QList<TreeItem*>> m_devicesFuture;
+     QFutureWatcher<QString> m_tracksFutureWatcher;
+     QFuture<QString> m_tracksFuture;
++    // Device activation that arrived while a parse was already running, to be
++    // re-dispatched from onTracksFound(). Persistent so that a device removed
++    // in the meantime invalidates instead of dangling.
++    QPersistentModelIndex m_queuedActivateChild;
+     QString m_title;
+ 
+     QSharedPointer<BaseTrackCache> m_trackSource;

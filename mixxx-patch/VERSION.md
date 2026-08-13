@@ -124,3 +124,70 @@
     silently drifted, applying only patches 1-9 — releases cut from it shipped
     without the headphone gain ceiling or hold-to-restart. Resynced with
     `build-mixxx-deb.yml` in the same commit as this patch.
+13. `perf-render-repaint.patch` (added 2026-08-13) — responsiveness pass over
+    the hot paths the patches above introduced. No controls, no config keys,
+    no observable behaviour change:
+    * Waveform bar markers: the downbeat X list becomes a reused member
+      instead of a QVector reallocated on every `draw()`; the two
+      `drawPolygon()` calls per downbeat collapse into one reused
+      `QPainterPath` filled with a single `drawPath()`; and `it - firstMarker`
+      is computed once before the loop rather than per beat —
+      `mixxx::Beats::const_iterator` is not guaranteed random-access, so
+      `operator-` can degrade to an O(n) `std::distance()`, making that loop
+      O(n²) per frame. The allshader/QOpenGL renderer gets the same iterator
+      fix plus a `reserve()` on its downbeat vertex buffer.
+    * Key traffic light: the refresh emitted `dataChanged` over the whole
+      `rowCount() × columnCount()` rectangle on every deck play/pause and
+      master-deck track change — i.e. continuously during a mix, through the
+      sort/filter proxy, over playlists of thousands of rows. Only the Key
+      column is invalidated now.
+    * `KeyUtils::guessKeyFromText()` ran once per Key cell per repaint, and a
+      second time in `roleValue()` for the displayed note name. Both share a
+      memoized text→`ChromaticKey` hash on `XdjMasterKeyTracker`.
+    * The visible-rows zoom and the fixed column layout both re-applied their
+      derived values from inside `resizeEvent()`, and `setFont()` /
+      `setDefaultSectionSize()` / `setColumnWidth()` each relayout the header
+      and repaint the viewport. Both early-out when the derived numbers are
+      unchanged, with explicit invalidation where the guard cannot see the
+      change (a new base font, a newly loaded model).
+    * The controller reconnect watchdog rescanned PortMidi + HID every 5 s
+      *forever* when a controller was enabled in the preferences but absent.
+      The first three attempts stay at 5 s so replugging still reconnects
+      promptly, then the interval doubles to a 60 s ceiling and resets once
+      everything enabled is open. Touches
+      `src/waveform/renderers/waveformrenderbeat.{h,cpp}`,
+      `src/waveform/renderers/allshader/waveformrenderbeat.cpp`,
+      `src/library/basetracktablemodel.cpp`,
+      `src/widget/wlibrarytableview.{h,cpp}`,
+      `src/widget/wtracktableview.{h,cpp}`,
+      `src/controllers/controllermanager.{h,cpp}`.
+14. `usb-browse-one-tap.patch` (added 2026-08-13) — USB A/B navigates on the
+    **first** press. The rekordbox device list only refreshes on activation, so
+    a press on a freshly inserted stick used to kick off the async
+    `QtConcurrent` device scan, return empty-handed, and do nothing visible;
+    only a second press found the device. A press that cannot find its device
+    now records the slot in `m_pendingUsb` and completes itself from the
+    sidebar model's `rowsInserted`/`modelReset` signal when the scan lands. The
+    retry deliberately does **not** re-prime the scan (that would restart it on
+    every batch of inserted rows); a new press, an eject or a root restore
+    supersedes the pending request; a 10 s single-shot timeout drops a request
+    for a stick that never appears; and a pending request whose slot is already
+    rooted is discarded rather than toggling the sidebar back off.
+    Also stops discarding the tap that lands while a PDB parse is in flight —
+    `activateChild()` queued behind a running parse used to be dropped with
+    only a warning, which on a slow stick is seconds of UI that ignores you.
+    The activation is stored as a `QPersistentModelIndex` and re-dispatched
+    from `onTracksFound()` through the event loop, taken out of the queue slot
+    *before* the future result is unwrapped so a failed parse releases it
+    instead of wedging it. Touches `src/library/librarycontrol.{h,cpp}` and
+    `src/library/rekordbox/rekordboxfeature.{h,cpp}`.
+    Skin side (same release): `style.qss` only — button modernisation
+    (consistent 3/4/8px radius tiers, `qlineargradient` fills so buttons read
+    as moulded hardware, a dimmed border/inactive-chrome ladder, and a
+    `:pressed` face on every button so a touch is acknowledged on touch-down
+    instead of when the action lands). The Pioneer palette, the tab strip's
+    proportions and the CDJ notch on `#WaveformInfo_Header` are unchanged.
+    Note the `:pressed` rules for the USB, LOAD and sampler buttons are scoped
+    to `[value="0"]`: a bare `:pressed` stays active for a whole hold and
+    would outrank the `[value]` rules that drive the eject and
+    hold-to-restart flashes, hiding them.

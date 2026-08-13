@@ -53,7 +53,7 @@ with flock; without it, two sticks inserted simultaneously both grabbed
 ## Behavior contract
 - USB sticks must mount at /media/USBA and /media/USBB (udev scripts).
 - On an unpatched Mixxx the skin still works; USB buttons are inert.
-- The first USB A/B press for a stick that is not yet in Mixxx's device list (fresh boot, or the stick was plugged in after the last scan) primes an async rescan and shows the Rekordbox landing page; the second press jumps to the device's playlists.
+- A USB A/B press for a stick that is not yet in Mixxx's device list (fresh boot, or the stick was plugged in after the last scan) primes an async rescan and then completes itself: the press is remembered and jumps to the device's playlists as soon as the scan reports it, so one press is enough. It used to take two. The pending press is dropped if you press again, eject, or leave the sidebar rooted elsewhere, and it gives up after 10 s if the stick never appears.
 
 ## Ejecting USB sticks (hold-to-eject)
 - Hold USB A/USB B ~5 s: the button flashes red/white, speeding up; at 5 s the

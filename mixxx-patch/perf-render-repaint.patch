@@ -1,0 +1,532 @@
+Description: Reduce per-frame and per-repaint cost of the XDJ additions
+ Pure cost reductions: no control, no config key and no observable behaviour
+ changes. Every item below is work the earlier patches in this series
+ introduced on a hot path, found while profiling why the console feels
+ sluggish on a Pi 4.
+ .
+ 1. Waveform bar markers (xdj-hardware.patch) ran three avoidable costs per
+    waveform, per deck, per frame:
+    - The downbeat X positions were collected into a function-local QVector
+      that reallocated on every draw(). It is now a member, cleared and
+      reused, matching why upstream keeps m_beats as a member.
+    - Each downbeat issued two separate drawPolygon() rasterisations. All
+      triangles now go into one reused QPainterPath filled with a single
+      drawPath().
+    - `it - firstMarker` was recomputed for every beat. mixxx::Beats'
+      const_iterator is not guaranteed random-access, so operator- can
+      degrade to an O(n) std::distance(), making the loop O(n^2) per frame.
+      The offset is computed once before the loop and incremented.
+    The allshader/QOpenGL renderer gets the same iterator fix plus a reserve()
+    on its downbeat vertex buffer.
+ .
+ 2. Key traffic light (library-ui.patch) invalidated the entire model --
+    rowCount() x columnCount() -- through the sort/filter proxy on every deck
+    play/pause and every master-deck track change, i.e. continuously during a
+    mix, over rekordbox playlists that can run to thousands of rows. Only the
+    Key column's background can change, so only that column is invalidated.
+ .
+ 3. The same traffic light called KeyUtils::guessKeyFromText() -- a string
+    parse -- once per Key cell per repaint, and roleValue() parsed the same
+    string a second time for the displayed note name. Both now share a
+    memoized text->ChromaticKey map on XdjMasterKeyTracker; a library has a
+    few dozen distinct key strings at most.
+ .
+ 4. The visible-rows zoom and the fixed column layout (library-ui.patch) both
+    recomputed and re-applied their derived values from inside resizeEvent().
+    setFont(), setMinimumSectionSize(), setDefaultSectionSize() and
+    setColumnWidth() each relayout the header and repaint the viewport, and a
+    resize that only changes width leaves every derived number identical.
+    Both now early-out when nothing changed, with explicit invalidation where
+    the guard cannot see the change (a new base font, a newly loaded model).
+ .
+ 5. The controller reconnect watchdog (xdj-hardware.patch) ran a full PortMidi
+    + HID enumeration every 5 s forever whenever a controller was enabled in
+    the preferences but not plugged in -- a recurring hitch and constant
+    background CPU for a device that may never return. The first three
+    attempts stay at 5 s so replugging still reconnects promptly (the
+    documented behaviour), then the interval doubles to a 60 s ceiling and
+    resets as soon as everything enabled is open again.
+Author: Pioneered fork
+Forwarded: no
+
+diff --git a/src/controllers/controllermanager.cpp b/src/controllers/controllermanager.cpp
+index 84ecfa0..c087291 100644
+--- a/src/controllers/controllermanager.cpp
++++ b/src/controllers/controllermanager.cpp
+@@ -3,6 +3,8 @@
+ #include <QSet>
+ #include <QThread>
+ 
++#include <algorithm>
++
+ #include "controllers/controller.h"
+ #include "controllers/controllerlearningeventfilter.h"
+ #include "controllers/controllermappinginfoenumerator.h"
+@@ -41,6 +43,13 @@ const mixxx::Duration ControllerManager::kPollInterval = mixxx::Duration::fromMi
+ #endif
+ 
+ namespace {
++/// XDJ reconnect watchdog pacing. Responsive interval first, so a replug is
++/// picked up quickly, then exponential backoff up to the ceiling so a
++/// permanently absent controller stops driving endless USB/MIDI enumerations.
++constexpr int kReconnectIntervalMs = 5000;
++constexpr int kReconnectMaxIntervalMs = 60000;
++constexpr int kReconnectFastAttempts = 3;
++
+ /// Strip slashes and spaces from device name, so that it can be used as config
+ /// key or a filename.
+ QString sanitizeDeviceName(QString name) {
+@@ -109,7 +118,7 @@ ControllerManager::ControllerManager(UserSettingsPointer pConfig)
+     connect(&m_pollTimer, &QTimer::timeout, this, &ControllerManager::pollDevices);
+ 
+     // XDJ reconnect watchdog (see slotCheckDisconnectedDevices).
+-    m_reconnectTimer.setInterval(5000);
++    m_reconnectTimer.setInterval(kReconnectIntervalMs);
+     connect(&m_reconnectTimer,
+             &QTimer::timeout,
+             this,
+@@ -362,8 +371,35 @@ void ControllerManager::slotCheckDisconnectedDevices() {
+         }
+     }
+ 
+-    if (needSetup) {
+-        slotSetUpDevices();
++    if (!needSetup) {
++        // Everything enabled is open: back to the responsive interval so the
++        // next unplug is noticed within 5 s.
++        m_reconnectMisses = 0;
++        if (m_reconnectTimer.interval() != kReconnectIntervalMs) {
++            m_reconnectTimer.setInterval(kReconnectIntervalMs);
++        }
++        return;
++    }
++
++    // slotSetUpDevices() is a full PortMidi + HID enumeration. A controller
++    // that is enabled in the preferences but simply not plugged in leaves
++    // needSetup true forever, so at a flat 5 s this rescanned indefinitely --
++    // a recurring hitch and constant background CPU on a Pi for a device that
++    // is never coming back.
++    //
++    // The first few attempts stay at 5 s, so replugging still reconnects
++    // promptly (the documented behaviour); after that the interval doubles up
++    // to a 60 s ceiling. Any successful open resets it above.
++    slotSetUpDevices();
++
++    if (++m_reconnectMisses > kReconnectFastAttempts) {
++        const int backoff = std::min(
++                m_reconnectTimer.interval() * 2, kReconnectMaxIntervalMs);
++        if (backoff != m_reconnectTimer.interval()) {
++            m_reconnectTimer.setInterval(backoff);
++            qDebug() << "Controller reconnect watchdog backing off to"
++                     << backoff << "ms";
++        }
+     }
+ }
+ 
+diff --git a/src/controllers/controllermanager.h b/src/controllers/controllermanager.h
+index 7a0cb72..92029c0 100644
+--- a/src/controllers/controllermanager.h
++++ b/src/controllers/controllermanager.h
+@@ -90,4 +90,7 @@ class ControllerManager : public QObject {
+     QSharedPointer<MappingInfoEnumerator> m_pMainThreadUserMappingEnumerator;
+     QSharedPointer<MappingInfoEnumerator> m_pMainThreadSystemMappingEnumerator;
+     bool m_skipPoll;
++    /// XDJ: consecutive reconnect-watchdog ticks that found an enabled
++    /// controller missing. Drives the rescan backoff.
++    int m_reconnectMisses = 0;
+ };
+diff --git a/src/library/basetracktablemodel.cpp b/src/library/basetracktablemodel.cpp
+index 8aa6a1d..708076e 100644
+--- a/src/library/basetracktablemodel.cpp
++++ b/src/library/basetracktablemodel.cpp
+@@ -3,6 +3,7 @@
+ #include <QBuffer>
+ #include <QDateTime>
+ #include <QGuiApplication>
++#include <QHash>
+ #include <QMimeData>
+ #include <QScreen>
+ #include <QSet>
+@@ -127,12 +128,30 @@ class XdjMasterKeyTracker {
+         }
+     }
+ 
+-    bool isCompatibleKeyText(const QString& keyText) const {
+-        if (m_compatibleKeys.isEmpty() || keyText.isEmpty()) {
+-            return false;
++    /// Memoized text->key parse. guessKeyFromText() is a string parse, and
++    /// this used to run once per Key cell per repaint (and a second time in
++    /// roleValue() for the displayed text). A library holds a few dozen
++    /// distinct key strings at most, so a hash makes every lookup after the
++    /// first free.
++    mixxx::track::io::key::ChromaticKey keyFromText(const QString& keyText) {
++        if (keyText.isEmpty()) {
++            return mixxx::track::io::key::INVALID;
++        }
++        const auto it = m_keyTextCache.constFind(keyText);
++        if (it != m_keyTextCache.constEnd()) {
++            return it.value();
+         }
+         const mixxx::track::io::key::ChromaticKey key =
+                 KeyUtils::guessKeyFromText(keyText);
++        m_keyTextCache.insert(keyText, key);
++        return key;
++    }
++
++    bool isCompatibleKeyText(const QString& keyText) {
++        if (m_compatibleKeys.isEmpty() || keyText.isEmpty()) {
++            return false;
++        }
++        const mixxx::track::io::key::ChromaticKey key = keyFromText(keyText);
+         if (key == mixxx::track::io::key::INVALID) {
+             return false;
+         }
+@@ -238,6 +257,7 @@ class XdjMasterKeyTracker {
+     DeckState m_decks[kMaxDecks];
+     QString m_masterGroup;
+     QSet<int> m_compatibleKeys;
++    QHash<QString, mixxx::track::io::key::ChromaticKey> m_keyTextCache;
+     QList<QPair<QObject*, std::function<void()>>> m_models;
+ };
+ 
+@@ -302,14 +322,31 @@ BaseTrackTableModel::BaseTrackTableModel(
+     }
+     XdjMasterKeyTracker::instance().registerModel(this, [this] {
+         // Repaint the key column's traffic-light backgrounds.
++        //
++        // Only the Key column's background can change, so only that column is
++        // invalidated. Invalidating the full rows x columns rectangle (as this
++        // did originally) pushed every cell of the model through the proxy on
++        // every deck play/pause -- i.e. constantly during a mix, over
++        // playlists that can run to thousands of rows.
+         const int rows = rowCount();
+         const int columns = columnCount();
+-        if (rows > 0 && columns > 0) {
+-            emit dataChanged(
+-                    index(0, 0),
+-                    index(rows - 1, columns - 1),
+-                    {Qt::BackgroundRole});
++        if (rows <= 0 || columns <= 0) {
++            return;
++        }
++        int keyColumn = -1;
++        for (int column = 0; column < columns; ++column) {
++            if (mapColumn(column) == ColumnCache::COLUMN_LIBRARYTABLE_KEY) {
++                keyColumn = column;
++                break;
++            }
++        }
++        if (keyColumn < 0) {
++            return;
+         }
++        emit dataChanged(
++                index(0, keyColumn),
++                index(rows - 1, keyColumn),
++                {Qt::BackgroundRole});
+     });
+ }
+ 
+@@ -1053,8 +1090,11 @@ QVariant BaseTrackTableModel::roleValue(
+                     rawSiblingValue(
+                             index, ColumnCache::COLUMN_LIBRARYTABLE_KEY_ID));
+             // XDJ: always display musical note names, never Camelot numbers.
++            // Shares the traffic-light's memo: this is the second parse of the
++            // same string per cell, and it runs on every repaint.
+             const mixxx::track::io::key::ChromaticKey guessedKey =
+-                    KeyUtils::guessKeyFromText(composedKey.toString());
++                    XdjMasterKeyTracker::instance().keyFromText(
++                            composedKey.toString());
+             if (guessedKey != mixxx::track::io::key::INVALID) {
+                 return KeyUtils::keyToString(guessedKey,
+                         KeyUtils::KeyNotation::Traditional);
+diff --git a/src/waveform/renderers/allshader/waveformrenderbeat.cpp b/src/waveform/renderers/allshader/waveformrenderbeat.cpp
+index 0146ca8..7827cc5 100644
+--- a/src/waveform/renderers/allshader/waveformrenderbeat.cpp
++++ b/src/waveform/renderers/allshader/waveformrenderbeat.cpp
+@@ -3,6 +3,7 @@
+ #include <QDomNode>
+ 
+ #include <algorithm>
++#include <iterator>
+ 
+ #include "skin/legacy/skincontext.h"
+ #include "track/track.h"
+@@ -100,10 +101,21 @@ void WaveformRenderBeat::paintGL() {
+     const auto firstMarker = trackBeats->cfirstmarker();
+     const float markerSize = std::max(4.f, rendererBreadth * 0.07f);
+     m_downbeatVertices.clear();
++    if (!m_isSlipRenderer) {
++        // One bar in four, two triangles each, three vertices per triangle.
++        m_downbeatVertices.reserve((numBeatsInRange / 4 + 1) * 6);
++    }
++
++    // Index of the first drawn beat relative to the marker, computed once and
++    // then incremented. mixxx::Beats' const_iterator is not guaranteed to be
++    // random-access, so `it - firstMarker` can degrade to an O(n)
++    // std::distance() -- per beat that made this loop O(n^2) per frame.
++    int beatIndexFromMarker = static_cast<int>(
++            std::distance(firstMarker, trackBeats->iteratorFrom(startPosition)));
+ 
+     for (auto it = trackBeats->iteratorFrom(startPosition);
+             it != trackBeats->cend() && *it <= endPosition;
+-            ++it) {
++            ++it, ++beatIndexFromMarker) {
+         double beatPosition = it->toEngineSamplePos();
+         double xBeatPoint =
+                 m_waveformRenderer->transformSamplePositionInRendererWorld(
+@@ -120,7 +132,6 @@ void WaveformRenderBeat::paintGL() {
+                 m_isSlipRenderer ? rendererBreadth / 2 : rendererBreadth);
+ 
+         if (!m_isSlipRenderer) {
+-            const int beatIndexFromMarker = it - firstMarker;
+             if (((beatIndexFromMarker % 4) + 4) % 4 == 0) {
+                 m_downbeatVertices.addTriangle(
+                         {x1 - markerSize, 0.f},
+diff --git a/src/waveform/renderers/waveformrenderbeat.cpp b/src/waveform/renderers/waveformrenderbeat.cpp
+index 4002836..55b550d 100644
+--- a/src/waveform/renderers/waveformrenderbeat.cpp
++++ b/src/waveform/renderers/waveformrenderbeat.cpp
+@@ -2,6 +2,7 @@
+ 
+ #include <QPainter>
+ 
++#include <iterator>
+ #include <utility>
+ 
+ #include "track/track.h"
+@@ -93,10 +94,17 @@ void WaveformRenderBeat::draw(QPainter* painter, QPaintEvent* /*event*/) {
+     // XDJ: rekordbox-style bar markers. The first beat marker is anchored on
+     // a downbeat by the rekordbox importer, so every 4th beat from it starts
+     // a bar.
++    //
++    // The index of the first drawn beat relative to the marker is computed
++    // once here and then simply incremented in the loop. mixxx::Beats'
++    // const_iterator is not guaranteed to be random-access, so `it -
++    // firstMarker` can degrade to std::distance() -- an O(n) walk. Doing it
++    // per beat made that O(n^2) per frame on long tracks.
+     const auto firstMarker = trackBeats->cfirstmarker();
+-    QVector<float> downbeatXs;
++    int beatIndexFromMarker = static_cast<int>(std::distance(firstMarker, it));
++    m_downbeatXs.clear();
+ 
+-    for (; it != trackBeats->cend() && *it <= endPosition; ++it) {
++    for (; it != trackBeats->cend() && *it <= endPosition; ++it, ++beatIndexFromMarker) {
+         double beatPosition = it->toEngineSamplePos();
+         double xBeatPoint =
+                 m_waveformRenderer->transformSamplePositionInRendererWorld(beatPosition);
+@@ -109,9 +117,8 @@ void WaveformRenderBeat::draw(QPainter* painter, QPaintEvent* /*event*/) {
+         }
+ 
+         if (orientation == Qt::Horizontal) {
+-            const int beatIndexFromMarker = it - firstMarker;
+             if (((beatIndexFromMarker % 4) + 4) % 4 == 0) {
+-                downbeatXs.append(static_cast<float>(xBeatPoint));
++                m_downbeatXs.append(static_cast<float>(xBeatPoint));
+             }
+             m_beats[beatCount++].setLine(xBeatPoint, 0.0f, xBeatPoint, rendererHeight);
+         } else {
+@@ -124,24 +131,28 @@ void WaveformRenderBeat::draw(QPainter* painter, QPaintEvent* /*event*/) {
+ 
+     // XDJ: draw small red triangles at the top and bottom of the waveform on
+     // the first beat of each bar, like rekordbox/CDJ beatgrids.
+-    if (!downbeatXs.isEmpty()) {
++    //
++    // All triangles go into one QPainterPath and are filled with a single
++    // drawPath(). The previous version issued two drawPolygon() rasterisations
++    // per downbeat, which on a Pi's software QPainter path meant dozens of
++    // separate fills per waveform per frame.
++    if (!m_downbeatXs.isEmpty()) {
+         const float markerSize = std::max(4.0f, rendererHeight * 0.07f);
+         const QColor barMarkerColor(0xE7, 0x1E, 0x27); // Pioneer red
+         painter->setPen(Qt::NoPen);
+         painter->setBrush(barMarkerColor);
+-        for (const float x : std::as_const(downbeatXs)) {
+-            const QPointF top[3] = {
+-                    QPointF(x - markerSize, 0.0f),
+-                    QPointF(x + markerSize, 0.0f),
+-                    QPointF(x, markerSize),
+-            };
+-            const QPointF bottom[3] = {
+-                    QPointF(x - markerSize, rendererHeight),
+-                    QPointF(x + markerSize, rendererHeight),
+-                    QPointF(x, rendererHeight - markerSize),
+-            };
+-            painter->drawPolygon(top, 3);
+-            painter->drawPolygon(bottom, 3);
++        // clear() keeps the path's already-allocated element buffer.
++        m_downbeatPath.clear();
++        for (const float x : std::as_const(m_downbeatXs)) {
++            m_downbeatPath.moveTo(x - markerSize, 0.0f);
++            m_downbeatPath.lineTo(x + markerSize, 0.0f);
++            m_downbeatPath.lineTo(x, markerSize);
++            m_downbeatPath.closeSubpath();
++            m_downbeatPath.moveTo(x - markerSize, rendererHeight);
++            m_downbeatPath.lineTo(x + markerSize, rendererHeight);
++            m_downbeatPath.lineTo(x, rendererHeight - markerSize);
++            m_downbeatPath.closeSubpath();
+         }
++        painter->drawPath(m_downbeatPath);
+     }
+ }
+diff --git a/src/waveform/renderers/waveformrenderbeat.h b/src/waveform/renderers/waveformrenderbeat.h
+index 439b23c..ae66a59 100644
+--- a/src/waveform/renderers/waveformrenderbeat.h
++++ b/src/waveform/renderers/waveformrenderbeat.h
+@@ -1,6 +1,7 @@
+ #pragma once
+ 
+ #include <QColor>
++#include <QPainterPath>
+ 
+ #include "skin/legacy/skincontext.h"
+ #include "util/class.h"
+@@ -17,6 +18,11 @@ class WaveformRenderBeat : public WaveformRendererAbstract {
+   private:
+     QColor m_beatColor;
+     QVector<QLineF> m_beats;
++    // XDJ: downbeat marker geometry, kept as members for the same reason
++    // m_beats is -- draw() runs per waveform, per deck, per frame, so a
++    // function-local container would reallocate on every frame.
++    QVector<float> m_downbeatXs;
++    QPainterPath m_downbeatPath;
+ 
+     DISALLOW_COPY_AND_ASSIGN(WaveformRenderBeat);
+ };
+diff --git a/src/widget/wlibrarytableview.cpp b/src/widget/wlibrarytableview.cpp
+index c2bb86d..c74415b 100644
+--- a/src/widget/wlibrarytableview.cpp
++++ b/src/widget/wlibrarytableview.cpp
+@@ -173,6 +173,10 @@ void WLibraryTableView::restoreCurrentIndex(const QModelIndex& index) {
+ 
+ void WLibraryTableView::setTrackTableFont(const QFont& font) {
+     m_baseTrackTableFont = font;
++    // The applyVisibleRows() guard keys off the derived row height and pixel
++    // size, neither of which changes when only the font family or weight does.
++    // Invalidate it so a genuine font-preference change is never swallowed.
++    invalidateAppliedMetrics();
+     if (m_visibleRows > 0) {
+         applyVisibleRows();
+     } else {
+@@ -209,6 +213,7 @@ void WLibraryTableView::setTrackTableRowHeight(int rowHeight) {
+ 
+ void WLibraryTableView::setTrackTableVisibleRows(int visibleRows) {
+     m_visibleRows = visibleRows;
++    invalidateAppliedMetrics();
+     if (m_visibleRows > 0) {
+         applyVisibleRows();
+     } else {
+@@ -228,8 +233,20 @@ void WLibraryTableView::applyVisibleRows() {
+         return;
+     }
+     const int rowHeight = math_max(8, viewportHeight / m_visibleRows);
++    const int pixelSize = math_max(8, static_cast<int>(rowHeight * 0.45));
++    // Early-out when the derived numbers have not moved. This runs from
++    // resizeEvent(), and applyFont() below re-polishes the font and both
++    // header section sizes -- each of which relayouts the header and repaints
++    // the viewport. Most resizes (and every resize that only changes width)
++    // leave rowHeight and pixelSize identical, so without this guard the
++    // relayout work was done again for no visible change.
++    if (rowHeight == m_appliedRowHeight && pixelSize == m_appliedPixelSize) {
++        return;
++    }
++    m_appliedRowHeight = rowHeight;
++    m_appliedPixelSize = pixelSize;
+     QFont font = m_baseTrackTableFont;
+-    font.setPixelSize(math_max(8, static_cast<int>(rowHeight * 0.45)));
++    font.setPixelSize(pixelSize);
+     applyFont(font);
+     verticalHeader()->setDefaultSectionSize(rowHeight);
+ }
+diff --git a/src/widget/wlibrarytableview.h b/src/widget/wlibrarytableview.h
+index 995f4cb..51c7097 100644
+--- a/src/widget/wlibrarytableview.h
++++ b/src/widget/wlibrarytableview.h
+@@ -79,6 +79,16 @@ class WLibraryTableView : public QTableView, public virtual LibraryView {
+     int m_prevRow;
+     int m_prevColumn;
+ 
++  protected:
++    /// XDJ: forget the last applied row height / font size, so the next
++    /// applyVisibleRows() re-applies them even if the derived numbers are
++    /// unchanged. Call after anything the guard cannot see (a new base font, a
++    /// new column layout) has invalidated the current metrics.
++    void invalidateAppliedMetrics() {
++        m_appliedRowHeight = -1;
++        m_appliedPixelSize = -1;
++    }
++
+   private:
+     void applyFont(const QFont& font);
+     void applyVisibleRows();
+@@ -90,4 +100,7 @@ class WLibraryTableView : public QTableView, public virtual LibraryView {
+     int m_visibleRows = 0;
+     int m_manualRowHeight = 20;
+     QFont m_baseTrackTableFont;
++    // Last values applied by applyVisibleRows(); -1 = nothing applied yet.
++    int m_appliedRowHeight = -1;
++    int m_appliedPixelSize = -1;
+ };
+diff --git a/src/widget/wtracktableview.cpp b/src/widget/wtracktableview.cpp
+index 95355ee..ab12656 100644
+--- a/src/widget/wtracktableview.cpp
++++ b/src/widget/wtracktableview.cpp
+@@ -346,6 +346,12 @@ void WTrackTableView::loadTrackModel(QAbstractItemModel* model, bool restoreStat
+     // XDJ: fixed appliance column layout for rekordbox views — the last
+     // visual column (Duration) stretches to the right edge.
+     horizontalHeader()->setStretchLastSection(pTrackModel->fixedColumnLayout());
++    // A new model means new column indices, and the freshly built header has
++    // none of our widths applied yet -- the caches below must not be allowed to
++    // conclude "already correct" just because the numbers happen to match the
++    // previous model's.
++    invalidateAppliedColumnWidths();
++    invalidateAppliedMetrics();
+     applyFixedColumnWidths();
+ 
+     setVisible(true);
+@@ -402,6 +408,18 @@ void WTrackTableView::applyFixedColumnWidths() {
+     // Artist/Title share the rest 40/60.
+     const int artistWidth = remaining * 2 / 5;
+     const int titleWidth = remaining - artistWidth;
++    // Early-out when the widths have not moved. Each setColumnWidth() below
++    // relayouts the header and repaints the viewport, and this is called from
++    // resizeEvent(), so recomputing identical widths was pure churn.
++    if (posWidth == m_appliedPosWidth && titleWidth == m_appliedTitleWidth &&
++            artistWidth == m_appliedArtistWidth &&
++            keyWidth == m_appliedKeyWidth) {
++        return;
++    }
++    m_appliedPosWidth = posWidth;
++    m_appliedTitleWidth = titleWidth;
++    m_appliedArtistWidth = artistWidth;
++    m_appliedKeyWidth = keyWidth;
+     setColumnWidth(posColumn, posWidth);
+     setColumnWidth(titleColumn, titleWidth);
+     setColumnWidth(artistColumn, artistWidth);
+diff --git a/src/widget/wtracktableview.h b/src/widget/wtracktableview.h
+index 73aff6b..52bfaab 100644
+--- a/src/widget/wtracktableview.h
++++ b/src/widget/wtracktableview.h
+@@ -166,8 +166,23 @@ class WTrackTableView : public WLibraryTableView {
+     // fixed appliance column layout (#, Title, Artist, Key, Duration).
+     void applyFixedColumnWidths();
+ 
++    /// XDJ: forget the last applied column widths so the next
++    /// applyFixedColumnWidths() re-applies them unconditionally.
++    void invalidateAppliedColumnWidths() {
++        m_appliedPosWidth = -1;
++        m_appliedTitleWidth = -1;
++        m_appliedArtistWidth = -1;
++        m_appliedKeyWidth = -1;
++    }
++
+     void hideOrRemoveSelectedTracks();
+ 
++    // Last widths applied by applyFixedColumnWidths(); -1 = nothing applied.
++    int m_appliedPosWidth = -1;
++    int m_appliedTitleWidth = -1;
++    int m_appliedArtistWidth = -1;
++    int m_appliedKeyWidth = -1;
++
+     const UserSettingsPointer m_pConfig;
+     Library* const m_pLibrary;
+ 

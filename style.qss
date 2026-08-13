@@ -11,6 +11,34 @@ White: #e5e6ea
 
 */
 
+/* Fork additions (canon since the touch-browse work, see
+   docs/superpowers/specs/2026-07-12-track-search-osk-design.md):
+
+Accent / armed / active: #b6294c   (pressed faces: #c62d54 -> #a62446)
+Deck 1 fill / edge:      #112f5c / #2d85cd
+Deck 2 fill / edge:      #5c1120 / #d73535
+
+Surface ladder (dark -> light):
+  black -> #0d0d10 (input) -> #16161a (panes) -> #1a1a20 (rows)
+        -> #32323c (headers) -> #3a3a44 (keys)
+Border ladder (dim -> bright):
+  #3c3c46 (resting) -> #4a4a52 (inactive chrome) -> #5a5a66 (hover)
+        -> #6a6a76 (pressed)
+Dim text: #8f8f99
+
+Radius scale: 3px small controls, 4px touch targets, 8px panels/banners.
+Deliberate exceptions: the CDJ notch on #WaveformInfo_Header (10px 25px)
+and the scrollbar handle pill (6px).
+
+QSS has no variables, so every value above is repeated literally. Buttons
+with a fill carry a top-down qlineargradient (~8% lift at the top edge) so
+they read as moulded hardware rather than flat rectangles; buttons that are
+deliberately chrome-less (the WPushButton base, #EffectToggle, #SettingsCog)
+stay transparent. The white flash faces (USB state 2, LOAD hold-to-restart)
+stay flat white on purpose -- they have to be maximally bright.
+
+*/
+
 /* DEBUG
 * {
   border: 1px solid rgba(255,255,255,0.1);
@@ -41,24 +69,36 @@ QMenuBar::item:pressed, QMenu::item:selected, QMenu::item:pressed {
 WPushButton {
   color: #e5e6ea;
   background-color: transparent;
-  border: 1px solid #32323c;
-  border-radius: 2px;
+  border: 1px solid #3c3c46;
+  border-radius: 3px;
   outline: none;
 }
 
 WPushButton:hover {
-  border: 1px solid #5F5F5F;
+  border: 1px solid #5a5a66;
 }
 
 WPushButton[value="1"] {
   color: #e5e6ea;
-  border: 1px solid #5F5F5F;
-  background-color: #32323c;
+  border: 1px solid #5a5a66;
+  background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+      stop:0 #3a3a45, stop:1 #2e2e37);
 }
 
 WPushButton[value="1"]:hover {
-  border: 1px solid #4B4B4B;
-  background-color: #30303a;
+  border: 1px solid #4e4e59;
+  background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+      stop:0 #38383f, stop:1 #2c2c34);
+}
+
+/* Touch-down feedback. This is a touchscreen appliance: without a :pressed
+   face a tap is unacknowledged until the action it triggered lands, which
+   reads as lag even when nothing is actually slow. Placed after the
+   [value="1"] rules above -- :pressed and [value="1"] have equal
+   specificity, so source order is what decides the winner. */
+WPushButton:pressed {
+  border: 1px solid #6a6a76;
+  background-color: #2a2a32;
 }
 
 /************************************************************************/
@@ -67,7 +107,7 @@ WPushButton[value="1"]:hover {
 
 #Deck {
   border: 1px solid transparent;
-  border-radius: 2px;
+  border-radius: 3px;
 }
 
 #Deck[highlight="1"] {
@@ -76,7 +116,7 @@ WPushButton[value="1"]:hover {
 
 #DeckBPMWrapper {
   border: 2px solid #e5e6ea;
-  border-radius: 5px;
+  border-radius: 4px;
   margin-bottom: 4px;
   padding-right: 2px;
   qproperty-layoutAlignment: 'AlignRight | AlignVCenter';
@@ -228,7 +268,7 @@ WEffectSelector {
 }
 
 #EffectToggle {
-  color: gray;
+  color: #8f8f99;
   font-weight: bold;
   text-transform: uppercase;
 }
@@ -336,8 +376,9 @@ WLabel {
 }
 
 #UsbButtonA, #UsbButtonB {
-  background-color: #1a1a20;
-  border: 1px solid #444444;
+  background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+      stop:0 #20202a, stop:1 #16161c);
+  border: 1px solid #3c3c46;
   border-radius: 3px;
   color: #aaaaaa;
   font-size: 18px;
@@ -346,15 +387,31 @@ WLabel {
 }
 
 #UsbButtonA[value="1"], #UsbButtonB[value="1"] {
-  background-color: #b6294c;
+  background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+      stop:0 #c62d54, stop:1 #a62446);
   border: 1px solid #b6294c;
   color: white;
 }
 
+/* State 2 is the eject-hold flash: flat white, maximum brightness. */
 #UsbButtonA[value="2"], #UsbButtonB[value="2"] {
   background-color: white;
   border: 1px solid white;
   color: #b6294c;
+}
+
+/* Scoped to [value="0"] deliberately, NOT a bare :pressed. A bare
+   #UsbButtonA:pressed stays active for the whole eject hold and would
+   outrank both [value] rules above (equal specificity, later in the file),
+   masking the accelerating 1/2 flash that tells you how long you have held.
+   The control stays 0 until the first flash tick at 600ms, so [value="0"]
+   covers exactly the window before the flash owns the button: instant
+   acknowledgement on the tap that browses, then hands over. */
+#UsbButtonA[value="0"]:pressed, #UsbButtonB[value="0"]:pressed {
+  background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+      stop:0 #c62d54, stop:1 #a62446);
+  border: 1px solid #b6294c;
+  color: white;
 }
 
 /* Centered popup banners (stacked overlay in skin.xml) */
@@ -384,16 +441,19 @@ WLabel {
 }
 
 #LoadDeck1 {
-  background-color: #112f5c;
+  background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+      stop:0 #163a6e, stop:1 #0e2850);
   border: 2px solid #2d85cd;
 }
 
 #LoadDeck2 {
-  background-color: #5c1120;
+  background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+      stop:0 #6e1628, stop:1 #500e1c);
   border: 2px solid #d73535;
 }
 
-/* Hold-to-restart flash (value driven by [Library],load_flash_N) */
+/* Hold-to-restart flash (value driven by [Library],load_flash_N).
+   Flat white on purpose: maximum brightness. */
 #LoadDeck1[value="1"] {
   background-color: white;
   border: 2px solid white;
@@ -404,6 +464,22 @@ WLabel {
   background-color: white;
   border: 2px solid white;
   color: #5c1120;
+}
+
+/* Scoped to [value="0"] for the same reason as the USB buttons: a bare
+   :pressed would sit on top of the hold-to-restart flash for the full 7s
+   hold and hide it. load_flash_N is 0 until the blink starts, so this is
+   just the tap acknowledgement. */
+#LoadDeck1[value="0"]:pressed {
+  background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+      stop:0 #2d85cd, stop:1 #1d5f9e);
+  border: 2px solid #6fb2e8;
+}
+
+#LoadDeck2[value="0"]:pressed {
+  background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+      stop:0 #d73535, stop:1 #9e2222);
+  border: 2px solid #ec7a7a;
 }
 
 /************************************************************************/
@@ -441,7 +517,7 @@ WLabel {
 
 #WaveformInfo_Key_Icon {
   background-color: #e5e6ea;
-  border-radius: 2px;
+  border-radius: 3px;
   font-size: 14px;
   margin: 4px;
   padding: -6px -6px -3px -2px;
@@ -496,12 +572,23 @@ WBeatSpinBox::up-button {
   text-transform: uppercase;
 }
 
+/* Dimmed inactive chrome (was gray = #808080) so the active #c3d541 tab
+   carries the strip. Border *width* stays 2px and the margins are untouched:
+   the tab strip's proportions are the most recognisable thing in the skin. */
 #TabControls WPushButton[value="0"] {
-  border: 2px solid gray;
-  color: gray;
+  border: 2px solid #4a4a52;
+  color: #8f8f99;
 }
 
 #TabControls WPushButton[value="1"] {
+  border: 2px solid #c3d541;
+  color: #c3d541;
+}
+
+/* Previews the selection on touch-down: tapping a tab shows the accent
+   immediately rather than after the WidgetStack has swapped pages. Scoped to
+   [value="0"] so it cannot repaint the already-active tab. */
+#TabControls WPushButton[value="0"]:pressed {
   border: 2px solid #c3d541;
   color: #c3d541;
 }
@@ -518,7 +605,7 @@ WBeatSpinBox::up-button {
 #TabControls #SettingsCog {
   background-color: black;
   border: none;
-  color: gray;
+  color: #8f8f99;
   font-size: 26px;
   margin: 6px 8px 6px 0;
   max-width: 56px;
@@ -526,6 +613,11 @@ WBeatSpinBox::up-button {
 }
 
 #TabControls #SettingsCog[value="1"] {
+  color: #c3d541;
+}
+
+/* Two IDs, matching the rules above, so it outranks the tab press face. */
+#TabControls #SettingsCog:pressed {
   color: #c3d541;
 }
 
@@ -566,8 +658,9 @@ WBeatSpinBox::up-button {
 #SettingsPanel #SettingsPowerOff,
 #SettingsPanel #SettingsRestart,
 #SettingsPanel #SettingsBack {
-  background-color: black;
-  border: 2px solid gray;
+  background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+      stop:0 #16161a, stop:1 black);
+  border: 2px solid #4a4a52;
   color: white;
 }
 
@@ -575,8 +668,22 @@ WBeatSpinBox::up-button {
    safe state it replaced. */
 #SettingsPanel #SettingsPowerOffArmed,
 #SettingsPanel #SettingsRestartArmed {
-  background-color: #b6294c;
+  background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+      stop:0 #c62d54, stop:1 #a62446);
   border: 2px solid white;
+  color: white;
+}
+
+/* Two-ID selectors, mandatory here: a single "#SettingsPanel WPushButton
+   :pressed" rule is one ID plus a pseudo-class and would lose to the two-ID
+   per-button rules above, silently doing nothing. The armed faces get no
+   press state -- the second tap commits, and it should look committed, not
+   like another arming step. */
+#SettingsPanel #SettingsPowerOff:pressed,
+#SettingsPanel #SettingsRestart:pressed,
+#SettingsPanel #SettingsBack:pressed {
+  background-color: #1f1f26;
+  border: 2px solid #6a6a76;
   color: white;
 }
 
@@ -585,9 +692,10 @@ WBeatSpinBox::up-button {
 /************************************************************************/
 
 #Sampler {
-  background-color: #32323c;
+  background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+      stop:0 #3a3a45, stop:1 #2e2e37);
   border: 2px solid #d73535;
-  border-radius: 2px;
+  border-radius: 4px;
   color: white;
   font-size: 24px;
   margin: 4px;
@@ -596,6 +704,11 @@ WBeatSpinBox::up-button {
 
 #Sampler[value="1"] {
   background-color: #d73535;
+}
+
+#Sampler[value="0"]:pressed {
+  background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+      stop:0 #e04a4a, stop:1 #b32626);
 }
 
 #Sampler_Info {
@@ -631,8 +744,9 @@ WBeatSpinBox::up-button {
 }
 
 #KbShow {
-  background-color: #1a1a20;
-  border: 1px solid #444444;
+  background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+      stop:0 #20202a, stop:1 #16161c);
+  border: 1px solid #3c3c46;
   border-radius: 3px;
   color: #aaaaaa;
   font-size: 18px;
@@ -641,7 +755,8 @@ WBeatSpinBox::up-button {
 }
 
 #KbShow[value="1"] {
-  background-color: #b6294c;
+  background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+      stop:0 #c62d54, stop:1 #a62446);
   border: 1px solid #b6294c;
   color: white;
 }
@@ -651,7 +766,8 @@ WBeatSpinBox::up-button {
 }
 
 #Keyboard WPushButton {
-  background-color: #3a3a44;
+  background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+      stop:0 #43434e, stop:1 #33333c);
   border: 1px solid #4d4d59;
   border-radius: 4px;
   color: #f0f0f0;
@@ -661,7 +777,8 @@ WBeatSpinBox::up-button {
 }
 
 #Keyboard WPushButton:pressed {
-  background-color: #b6294c;
+  background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+      stop:0 #c62d54, stop:1 #a62446);
   border: 1px solid #b6294c;
   color: white;
 }
@@ -671,7 +788,8 @@ WBeatSpinBox::up-button {
 }
 
 #KbDone[value="1"] {
-  background-color: #b6294c;
+  background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+      stop:0 #c62d54, stop:1 #a62446);
   border: 1px solid #b6294c;
   color: white;
 }
