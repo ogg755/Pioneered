@@ -9,6 +9,22 @@
         <Layout>horizontal</Layout>
         <SizePolicy>me,me</SizePolicy>
         <Children>
+          <!-- Fixed left counterweight, exactly the cog's footprint (56f
+               button + its 8px right margin). Without it the only slack in
+               the strip sat on the right, so the three tabs were pushed left
+               of centre.
+
+               Deliberately fixed rather than expanding: an expanding spacer
+               competes with the tabs for surplus on equal terms, so on the
+               Pi's 800px screen five equal claimants would leave the tabs at
+               ~147px with ~294px wasted on spacers. Fixed at both ends, the
+               tabs split every remaining pixel three ways — identical
+               widths, and the strip is symmetric at any window size. -->
+          <WidgetGroup>
+            <ObjectName>TabSpacer</ObjectName>
+            <Layout>horizontal</Layout>
+            <Size>64f,0me</Size>
+          </WidgetGroup>
           <Template src="skin:tab.xml">
             <SetVariable name="tab_name">Overview</SetVariable>
             <SetVariable name="config_key">overview</SetVariable>
@@ -21,17 +37,9 @@
             <SetVariable name="tab_name">Search</SetVariable>
             <SetVariable name="config_key">search</SetVariable>
           </Template>
-          <!-- Expanding spacer, so the cog pins to the right corner and the
-               tabs keep the width they already render at (style.qss caps
-               them via max-width). All surplus lands here rather than being
-               shared out, so adding the cog does not resize the tabs; below
-               ~800px the spacer collapses first and the tabs shrink as they
-               always did. -->
-          <WidgetGroup>
-            <ObjectName>TabSpacer</ObjectName>
-            <Layout>horizontal</Layout>
-            <SizePolicy>me,me</SizePolicy>
-          </WidgetGroup>
+          <!-- No right spacer: the tabs expand to fill, which pins the cog to
+               the right corner on its own. A spacer here would only take
+               width away from the tabs. -->
           <PushButton>
             <ObjectName>SettingsCog</ObjectName>
             <Size>56f,0me</Size>

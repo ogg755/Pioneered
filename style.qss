@@ -564,11 +564,22 @@ WBeatSpinBox::up-button {
 /*     Tabs                                                             */
 /************************************************************************/
 
+/* margin was "10px 10%": Qt Style Sheets have no percentage length (the
+   parser takes px/pt/em/ex only), so "10%" silently evaluated to 0 and the
+   tabs had no horizontal gutter at all — the gaps came from Qt spreading
+   leftover space, which is why they never looked even. Real px values, so
+   the gutter between every pair of tabs is identical.
+
+   max-width is gone with it. Capping the tabs left surplus that nothing
+   could absorb, and Qt parks that slack at one end of the strip rather than
+   splitting it — the tabs stayed equal to each other but the group sat
+   off-centre. Uncapped, the three of them divide the space between the
+   fixed left counterweight and the cog exactly three ways at any window
+   size. On the 800px Pi panel that is ~224px per tab. */
 #TabControls WPushButton {
   background-color: black;
   font-weight: bold;
-  margin: 10px 10%;
-  max-width: 250px;
+  margin: 8px 6px;
   text-transform: uppercase;
 }
 

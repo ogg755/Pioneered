@@ -1,7 +1,11 @@
 <Template>
   <PushButton>
     <ObjectName>TabButton<Variable name="tab_name"/></ObjectName>
-    <Size>12me,12me</Size>
+    <!-- Width minimum 0 so all three tabs take an identical share of the
+         strip. A per-tab width minimum is added on top of each tab's equal
+         share of the surplus, so it only ever pushes them apart. Height
+         keeps its minimum. -->
+    <Size>0me,12me</Size>
     <NumberStates>2</NumberStates>
     <State>
       <Number>0</Number>
