@@ -22,7 +22,13 @@
 1. `usb-browse.patch` — touch browse + hold-to-eject (field-verified r8.1)
 2. `pdb-corruption-hardening.patch` — PDB segfault fixes (field-verified r8.1)
 3. `xdj-behavior.patch` — waveform EQ decoupling, loop from cue, Filter curve
-   (shipped r9.1, awaiting field test)
+   (shipped r9.1, awaiting field test). r23 (2026-08-14) also pins the overall
+   waveform amplitude: `WaveformWidgetRenderer::onPreRender` sets `m_gain = 1.0`
+   instead of reading `[ChannelN],total_gain`, so the channel gain/trim knob and
+   replaygain no longer scale the waveform height — it is drawn at a fixed scale
+   reflecting the track's content, like Pioneer hardware. total_gain still drives
+   the audio path; the /2 EnginePregain compensation via `getGain()` is retained.
+   Touches `src/waveform/renderers/waveformwidgetrenderer.cpp`.
 4. `library-ui.patch` (added 2026-07-11) — "Tracks visible in list" zoom
    preference (`[Library] VisibleRows`, default 8), rekordbox lists always
    open sorted by # ascending, Pioneer-style key traffic light vs the master

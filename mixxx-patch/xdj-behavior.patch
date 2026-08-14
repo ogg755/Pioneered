@@ -3,7 +3,9 @@ Description: XDJ-style behavior tweaks (waveform EQ decoupling, loop from cue)
     hardware: the EQ knobs and kill switches no longer scale the waveform
     bands, so a closed EQ still shows whether the track has bass/mid/high
     at that point. The per-band visual gains from the waveform preferences
-    still apply.
+    still apply. Likewise the channel gain/trim knob (and replaygain) no
+    longer scale the overall waveform height -- the wave is drawn at a fixed
+    amplitude reflecting the track's own content, not the mix level.
  2. Pressing loop-out with no loop-in set creates a loop starting at the
     main cue point (Pioneer behavior), instead of being ignored.
  3. The Filter effect (deck filter super knob) gets a Pioneer-style response
@@ -66,6 +68,23 @@ diff --git a/src/waveform/renderers/waveformrenderersignalbase.cpp b/src/wavefor
  
          if (pLowGain != nullptr) {
              *pLowGain = lowGain;
+diff --git a/src/waveform/renderers/waveformwidgetrenderer.cpp b/src/waveform/renderers/waveformwidgetrenderer.cpp
+--- a/src/waveform/renderers/waveformwidgetrenderer.cpp
++++ b/src/waveform/renderers/waveformwidgetrenderer.cpp
+@@ -126,7 +126,12 @@
+     //Fetch parameters before rendering in order the display all sub-renderers with the same values
+     double rateRatio = m_pRateRatioCO->get();
+
+-    m_gain = m_pGainControlObject->get();
++    // Pioneered: draw the waveform at a fixed amplitude, like Pioneer gear --
++    // the channel gain/trim knob (and replaygain) scale total_gain, but they
++    // must not stretch the waveform taller or squash it shorter, so the wave
++    // keeps reflecting the track's own content rather than the mix level.
++    // total_gain still drives the audio path; only the visual scale is pinned.
++    m_gain = 1.0;
+
+     // Compute visual sample to pixel ratio
+     // Allow waveform to spread one visual sample across a hundred pixels
 diff --git a/src/engine/controls/loopingcontrol.cpp b/src/engine/controls/loopingcontrol.cpp
 --- a/src/engine/controls/loopingcontrol.cpp
 +++ b/src/engine/controls/loopingcontrol.cpp
