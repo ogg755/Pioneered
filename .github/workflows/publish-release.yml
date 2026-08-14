@@ -139,7 +139,7 @@ jobs:
           name: release-debs
           path: debs
 
-      - name: Create release
+      - name: Create or update release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -147,7 +147,17 @@ jobs:
           NOTES="docs/release-notes/${TAG}.md"
           TITLE="$(head -1 "$NOTES" | sed 's/^# *//')"
           tail -n +2 "$NOTES" | sed '1{/^$/d}' | grep -v '<!-- debs:' > body.md
-          gh release create "$TAG" debs/*.deb \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "$TITLE" \
-            --notes-file body.md
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$TITLE" \
+              --notes-file body.md
+            gh release upload "$TAG" debs/*.deb \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
+          else
+            gh release create "$TAG" debs/*.deb \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$TITLE" \
+              --notes-file body.md
+          fi
