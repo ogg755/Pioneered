@@ -1,0 +1,217 @@
+Description: Slimmer CDJ/XDJ-style beatgrid overlay
+ Restyles the rekordbox beatgrid markers introduced by xdj-hardware.patch to
+ match the Pioneer CDJ/XDJ look, where the grid is drawn as short ticks at the
+ top and bottom edges of the waveform rather than lines and arrows through the
+ whole height.
+ .
+ 1. Every-beat marks were full-height vertical lines; they are now short ticks
+    at the top and bottom edges only (kBeatTickFraction of the waveform height).
+    The software renderer keeps the top tick in m_beats and adds a bottom tick
+    in a new m_beatsBottom vector; the allshader renderer keeps the top tick in
+    m_vertices (so its reserved vertex count is unchanged) and adds the bottom
+    tick in a new m_beatBottomVertices buffer drawn in the same colour.
+ .
+ 2. Bar-start (downbeat) markers were large red triangles/arrows; they are now
+    thin red vertical bars (kBarHalfWidth) at the top and bottom, the same
+    height as the beat ticks. In the allshader renderer the two triangles per
+    downbeat become two rectangles, so its downbeat reserve doubles to 12
+    vertices per bar.
+ .
+ Size is controlled by two named constants in each renderer: kBeatTickFraction
+ (tick/bar height, as a fraction of the waveform height) and kBarHalfWidth (red
+ bar half-width in px). Applied after perf-render-repaint.patch, on top of its
+ batched QPainterPath / reused-member draw path.
+Author: Pioneered fork
+Forwarded: no
+
+diff --git a/src/waveform/renderers/allshader/waveformrenderbeat.cpp b/src/waveform/renderers/allshader/waveformrenderbeat.cpp
+index 7827cc5..bf72b2b 100644
+--- a/src/waveform/renderers/allshader/waveformrenderbeat.cpp
++++ b/src/waveform/renderers/allshader/waveformrenderbeat.cpp
+@@ -99,12 +99,19 @@ void WaveformRenderBeat::paintGL() {
+     // anchors the first beat marker on a downbeat, so every 4th beat from it
+     // starts a bar.
+     const auto firstMarker = trackBeats->cfirstmarker();
+-    const float markerSize = std::max(4.f, rendererBreadth * 0.07f);
++    // XDJ: short ticks at the top and bottom edges instead of full-height beat
++    // lines, plus thin red bars on the downbeats, like a CDJ/XDJ beatgrid.
++    // Tune kBeatTickFraction (tick height) and kBarHalfWidth (red bar width).
++    const float tickHeight = std::max(4.f, rendererBreadth * 0.11f);
++    constexpr float kBarHalfWidth = 1.5f;
+     m_downbeatVertices.clear();
+     if (!m_isSlipRenderer) {
+-        // One bar in four, two triangles each, three vertices per triangle.
+-        m_downbeatVertices.reserve((numBeatsInRange / 4 + 1) * 6);
++        // One bar in four, two rectangles each, six vertices per rectangle.
++        m_downbeatVertices.reserve((numBeatsInRange / 4 + 1) * 12);
+     }
++    // Bottom half of the beat ticks (same colour as the top ticks).
++    m_beatBottomVertices.clear();
++    m_beatBottomVertices.reserve(reserved);
+ 
+     // Index of the first drawn beat relative to the marker, computed once and
+     // then incremented. mixxx::Beats' const_iterator is not guaranteed to be
+@@ -126,21 +133,20 @@ void WaveformRenderBeat::paintGL() {
+         const float x1 = static_cast<float>(xBeatPoint);
+         const float x2 = x1 + 1.f;
+ 
+-        m_vertices.addRectangle(x1,
+-                0.f,
+-                x2,
+-                m_isSlipRenderer ? rendererBreadth / 2 : rendererBreadth);
++        // Top tick reuses m_vertices (so the reserved count is unchanged); the
++        // bottom tick goes in its own buffer, drawn in the same colour below.
++        const float breadth = m_isSlipRenderer ? rendererBreadth / 2.f : rendererBreadth;
++        m_vertices.addRectangle(x1, 0.f, x2, tickHeight);
++        m_beatBottomVertices.addRectangle(x1, breadth - tickHeight, x2, breadth);
+ 
+         if (!m_isSlipRenderer) {
+             if (((beatIndexFromMarker % 4) + 4) % 4 == 0) {
+-                m_downbeatVertices.addTriangle(
+-                        {x1 - markerSize, 0.f},
+-                        {x1 + markerSize, 0.f},
+-                        {x1, markerSize});
+-                m_downbeatVertices.addTriangle(
+-                        {x1 - markerSize, rendererBreadth},
+-                        {x1 + markerSize, rendererBreadth},
+-                        {x1, rendererBreadth - markerSize});
++                m_downbeatVertices.addRectangle(
++                        x1 - kBarHalfWidth, 0.f, x1 + kBarHalfWidth, tickHeight);
++                m_downbeatVertices.addRectangle(x1 - kBarHalfWidth,
++                        rendererBreadth - tickHeight,
++                        x1 + kBarHalfWidth,
++                        rendererBreadth);
+             }
+         }
+     }
+@@ -164,6 +170,14 @@ void WaveformRenderBeat::paintGL() {
+ 
+     glDrawArrays(GL_TRIANGLES, 0, m_vertices.size());
+ 
++    // XDJ: bottom half of the beat ticks (same colour as the top ticks).
++    if (m_beatBottomVertices.size() > 0) {
++        m_shader.setAttributeArray(
++                positionLocation, GL_FLOAT, m_beatBottomVertices.constData(), 2);
++        m_shader.setUniformValue(colorLocation, m_color);
++        glDrawArrays(GL_TRIANGLES, 0, m_beatBottomVertices.size());
++    }
++
+     // XDJ: second pass for the red bar markers.
+     if (m_downbeatVertices.size() > 0) {
+         QColor barMarkerColor(0xE7, 0x1E, 0x27); // Pioneer red
+diff --git a/src/waveform/renderers/allshader/waveformrenderbeat.h b/src/waveform/renderers/allshader/waveformrenderbeat.h
+index 2d89443..711a400 100644
+--- a/src/waveform/renderers/allshader/waveformrenderbeat.h
++++ b/src/waveform/renderers/allshader/waveformrenderbeat.h
+@@ -28,7 +28,9 @@ class allshader::WaveformRenderBeat final : public allshader::WaveformRenderer {
+     mixxx::UnicolorShader m_shader;
+     QColor m_color;
+     VertexData m_vertices;
+-    // XDJ: red bar-start triangles (rekordbox-style downbeat markers).
++    // XDJ: bottom half of the beat ticks (top half is in m_vertices).
++    VertexData m_beatBottomVertices;
++    // XDJ: red bar-start rectangles (rekordbox-style downbeat markers).
+     VertexData m_downbeatVertices;
+ 
+     bool m_isSlipRenderer;
+diff --git a/src/waveform/renderers/waveformrenderbeat.cpp b/src/waveform/renderers/waveformrenderbeat.cpp
+index 55b550d..9b028d1 100644
+--- a/src/waveform/renderers/waveformrenderbeat.cpp
++++ b/src/waveform/renderers/waveformrenderbeat.cpp
+@@ -104,6 +104,14 @@ void WaveformRenderBeat::draw(QPainter* painter, QPaintEvent* /*event*/) {
+     int beatIndexFromMarker = static_cast<int>(std::distance(firstMarker, it));
+     m_downbeatXs.clear();
+ 
++    // XDJ: beats are drawn as short ticks at the top and bottom edges rather
++    // than full-height lines, like a CDJ/XDJ beatgrid. The top ticks reuse
++    // m_beats; the bottom ticks live in m_beatsBottom so we don't depend on
++    // the upstream m_beats sizing. Tune kBeatTickFraction to change how tall
++    // the ticks are.
++    constexpr float kBeatTickFraction = 0.11f; // ~11% of the waveform height
++    const float tickHeight = std::max(5.0f, rendererHeight * kBeatTickFraction);
++
+     for (; it != trackBeats->cend() && *it <= endPosition; ++it, ++beatIndexFromMarker) {
+         double beatPosition = it->toEngineSamplePos();
+         double xBeatPoint =
+@@ -115,12 +123,19 @@ void WaveformRenderBeat::draw(QPainter* painter, QPaintEvent* /*event*/) {
+         if (beatCount >= m_beats.size()) {
+             m_beats.resize(m_beats.size() * 2);
+         }
++        if (m_beatsBottom.size() < m_beats.size()) {
++            m_beatsBottom.resize(m_beats.size());
++        }
+ 
+         if (orientation == Qt::Horizontal) {
+             if (((beatIndexFromMarker % 4) + 4) % 4 == 0) {
+                 m_downbeatXs.append(static_cast<float>(xBeatPoint));
+             }
+-            m_beats[beatCount++].setLine(xBeatPoint, 0.0f, xBeatPoint, rendererHeight);
++            // Short ticks at the top and bottom, not a full-height line.
++            m_beats[beatCount].setLine(xBeatPoint, 0.0f, xBeatPoint, tickHeight);
++            m_beatsBottom[beatCount].setLine(
++                    xBeatPoint, rendererHeight - tickHeight, xBeatPoint, rendererHeight);
++            ++beatCount;
+         } else {
+             m_beats[beatCount++].setLine(0.0f, xBeatPoint, rendererWidth, xBeatPoint);
+         }
+@@ -128,30 +143,30 @@ void WaveformRenderBeat::draw(QPainter* painter, QPaintEvent* /*event*/) {
+ 
+     // Make sure to use constData to prevent detaches!
+     painter->drawLines(m_beats.constData(), beatCount);
++    if (orientation == Qt::Horizontal) {
++        painter->drawLines(m_beatsBottom.constData(), beatCount);
++    }
+ 
+-    // XDJ: draw small red triangles at the top and bottom of the waveform on
+-    // the first beat of each bar, like rekordbox/CDJ beatgrids.
++    // XDJ: draw small red bars at the top and bottom of the waveform on the
++    // first beat of each bar, like rekordbox/CDJ beatgrids. They share the
++    // beat ticks' height (tickHeight) and are kBarHalfWidth*2 pixels wide.
+     //
+-    // All triangles go into one QPainterPath and are filled with a single
+-    // drawPath(). The previous version issued two drawPolygon() rasterisations
+-    // per downbeat, which on a Pi's software QPainter path meant dozens of
+-    // separate fills per waveform per frame.
++    // All bars go into one QPainterPath and are filled with a single
++    // drawPath(), instead of a rasterisation per rectangle.
+     if (!m_downbeatXs.isEmpty()) {
+-        const float markerSize = std::max(4.0f, rendererHeight * 0.07f);
++        constexpr float kBarHalfWidth = 1.5f; // red bar ~3px wide
+         const QColor barMarkerColor(0xE7, 0x1E, 0x27); // Pioneer red
+         painter->setPen(Qt::NoPen);
+         painter->setBrush(barMarkerColor);
+         // clear() keeps the path's already-allocated element buffer.
+         m_downbeatPath.clear();
+         for (const float x : std::as_const(m_downbeatXs)) {
+-            m_downbeatPath.moveTo(x - markerSize, 0.0f);
+-            m_downbeatPath.lineTo(x + markerSize, 0.0f);
+-            m_downbeatPath.lineTo(x, markerSize);
+-            m_downbeatPath.closeSubpath();
+-            m_downbeatPath.moveTo(x - markerSize, rendererHeight);
+-            m_downbeatPath.lineTo(x + markerSize, rendererHeight);
+-            m_downbeatPath.lineTo(x, rendererHeight - markerSize);
+-            m_downbeatPath.closeSubpath();
++            m_downbeatPath.addRect(
++                    x - kBarHalfWidth, 0.0f, 2.0f * kBarHalfWidth, tickHeight);
++            m_downbeatPath.addRect(x - kBarHalfWidth,
++                    rendererHeight - tickHeight,
++                    2.0f * kBarHalfWidth,
++                    tickHeight);
+         }
+         painter->drawPath(m_downbeatPath);
+     }
+diff --git a/src/waveform/renderers/waveformrenderbeat.h b/src/waveform/renderers/waveformrenderbeat.h
+index ae66a59..4a5afce 100644
+--- a/src/waveform/renderers/waveformrenderbeat.h
++++ b/src/waveform/renderers/waveformrenderbeat.h
+@@ -18,6 +18,10 @@ class WaveformRenderBeat : public WaveformRendererAbstract {
+   private:
+     QColor m_beatColor;
+     QVector<QLineF> m_beats;
++    // XDJ: bottom half of each beat tick. Kept as a member (like m_beats) so
++    // draw() -- which runs per waveform, per deck, per frame -- does not
++    // reallocate it every frame.
++    QVector<QLineF> m_beatsBottom;
+     // XDJ: downbeat marker geometry, kept as members for the same reason
+     // m_beats is -- draw() runs per waveform, per deck, per frame, so a
+     // function-local container would reallocate on every frame.

@@ -197,3 +197,22 @@
     to `[value="0"]`: a bare `:pressed` stays active for a whole hold and
     would outrank the `[value]` rules that drive the eject and
     hold-to-restart flashes, hiding them.
+15. `beatgrid-ticks.patch` (added 2026-08-15, r24) — restyles the rekordbox
+    beatgrid overlay from `xdj-hardware.patch` to the Pioneer CDJ/XDJ look.
+    Every-beat marks become short ticks at the top and bottom edges instead of
+    full-height lines, and the bar-start (downbeat) markers become thin red
+    vertical bars top and bottom instead of large red triangles/arrows. Both
+    the software (QPainter) and allshader (QOpenGL) renderers are changed in
+    lock-step. Software: the top tick stays in `m_beats`, a new `m_beatsBottom`
+    holds the bottom tick, and the downbeat `QPainterPath` draws `addRect`
+    bars rather than triangles. Allshader: the top tick stays in `m_vertices`
+    (so its `reserved`/`DEBUG_ASSERT` vertex count is unchanged), a new
+    `m_beatBottomVertices` buffer holds the bottom tick (own draw pass, beat
+    colour), and the two downbeat triangles become two rectangles (downbeat
+    reserve doubles, 6→12 vertices per bar). Size is controlled by two named
+    constants per renderer: `kBeatTickFraction` (tick/bar height as a fraction
+    of the waveform height) and `kBarHalfWidth` (red bar half-width, px).
+    Applied after `perf-render-repaint.patch`, on top of its batched
+    `QPainterPath` / reused-member draw path. Touches
+    `src/waveform/renderers/waveformrenderbeat.{h,cpp}` and
+    `src/waveform/renderers/allshader/waveformrenderbeat.{h,cpp}`.

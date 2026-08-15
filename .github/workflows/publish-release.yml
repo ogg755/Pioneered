@@ -83,6 +83,7 @@ jobs:
           patch -p1 < "$GITHUB_WORKSPACE/mixxx-patch/system-menu.patch"
           patch -p1 < "$GITHUB_WORKSPACE/mixxx-patch/perf-render-repaint.patch"
           patch -p1 < "$GITHUB_WORKSPACE/mixxx-patch/usb-browse-one-tap.patch"
+          patch -p1 < "$GITHUB_WORKSPACE/mixxx-patch/beatgrid-ticks.patch"
           # Version the build after the release tag (v2.5.0-r20 -> +usbbrowse.r20.1)
           # so deb versions keep increasing with the release series.
           SUFFIX="${GITHUB_REF_NAME##*-}"

@@ -38,6 +38,7 @@ jobs:
           patch -p1 < "$GITHUB_WORKSPACE/mixxx-patch/system-menu.patch"
           patch -p1 < "$GITHUB_WORKSPACE/mixxx-patch/perf-render-repaint.patch"
           patch -p1 < "$GITHUB_WORKSPACE/mixxx-patch/usb-browse-one-tap.patch"
+          patch -p1 < "$GITHUB_WORKSPACE/mixxx-patch/beatgrid-ticks.patch"
           DEBEMAIL=pioneered-build@localhost DEBFULLNAME="Pioneered CI" \
             dch --local "+usbbrowse.r${GITHUB_RUN_NUMBER}." "Pioneered USB browse/eject patch build ${GITHUB_RUN_NUMBER}"
 
