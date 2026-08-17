@@ -1,0 +1,289 @@
+Description: Jog wheel nudge fixes (side ring never scratches, latency-independent bend)
+ 1. The jog side ring is always a pitch bend. The stock DDJ-400 mapping routes
+    all three jog rotation messages (side 0x21, platter 0x22/0x23) to one
+    handler that scratches whenever [ChannelN],scratch2_enable is set,
+    regardless of which part of the wheel moved. That flag stays set for a
+    while after the platter top is released -- scratchDisable() ramps the rate
+    back to playback speed before clearing it, and every scratchTick()
+    restarts the ramp -- so nudging the side during that window scratched the
+    deck and kept the window open. jogTurn() now scratches only for the
+    platter message and only while the touch sensor says the top is actually
+    held (new PioneerDDJ400.jogTouched state), and a bend arriving while a
+    stale scratch is still active clears it first so the nudge is not
+    swallowed by scratch2.
+ 2. Nudge response no longer depends on the audio buffer setting. The jog
+    smoothing window (Rotary moving average in RateControl) was a fixed count
+    of 25 audio buffers, i.e. ~125 ms at a 5 ms desktop buffer but well over
+    half a second at the Pi's buffer size, and it kept applying the nudge for
+    that whole window after the hand stopped -- so every beatmatch
+    overcorrected. The window is now a fixed ~60 ms of real time, and the jog
+    sensitivity is normalised against a reference buffer duration so a detent
+    shifts the track by the same amount at any latency. Both changes answer
+    upstream FIXMEs in ratecontrol.cpp. The mapping's bendScale (the
+    per-detent sensitivity knob) drops 0.8 -> 0.4 to match.
+Author: Pioneered CI <pioneered-build@localhost>
+Forwarded: no
+
+--- a/res/controllers/Pioneer-DDJ-400-script.js
++++ b/res/controllers/Pioneer-DDJ-400-script.js
+@@ -109,7 +109,24 @@
+ 
+ // Multiplier for fast seek through track using SHIFT+JOGWHEEL
+ PioneerDDJ400.fastSeekScale = 150;
+-PioneerDDJ400.bendScale = 0.8;
++// Pioneered: sensitivity of the jog side (pitch bend / nudge). This is *the*
++// knob for how far one detent shifts the track -- raise it for coarser nudges,
++// lower it for finer ones. Halved from the stock 0.8, which moved the track
++// too far per degree of rotation on this build.
++PioneerDDJ400.bendScale = 0.4;
++
++// Pioneered: MIDI control number of the one jog rotation message that is
++// allowed to scratch. All three are the same on both decks; only the status
++// byte differs (0xB0 / 0xB1):
++//   0x21 = jog side ring               -> always a pitch bend
++//   0x22 = platter top, vinyl mode on  -> may scratch (this one)
++//   0x23 = platter top, vinyl mode off -> pitch bend
++PioneerDDJ400.jogPlatterScratchCC = 0x22;
++
++// Pioneered: is the platter top being held right now? Driven by the touch
++// sensor (note 0x36) in jogTouch, and required before any wheel movement is
++// allowed to scratch. Indexed by channel (0 = deck 1, 1 = deck 2).
++PioneerDDJ400.jogTouched = [false, false];
+ 
+ PioneerDDJ400.tempoRanges = [0.06, 0.10, 0.16, 0.25];
+ 
+@@ -191,6 +208,9 @@
+     PioneerDDJ400.toggleLight(PioneerDDJ400.lights.deck1.vuMeter, false);
+     PioneerDDJ400.toggleLight(PioneerDDJ400.lights.deck2.vuMeter, false);
+ 
++    // Pioneered: no platter is being held at startup.
++    PioneerDDJ400.jogTouched = [false, false];
++
+     engine.softTakeover("[Channel1]", "rate", true);
+     engine.softTakeover("[Channel2]", "rate", true);
+     engine.softTakeover("[EffectRack1_EffectUnit1_Effect1]", "meta", true);
+@@ -491,7 +511,7 @@
+ // Jog wheels
+ //
+ 
+-PioneerDDJ400.jogTurn = function(channel, _control, value, _status, group) {
++PioneerDDJ400.jogTurn = function(channel, control, value, _status, group) {
+     const deckNum = channel + 1;
+     // wheel center at 64; <64 rew >64 fwd
+     let newVal = value - 64;
+@@ -511,11 +531,31 @@
+         }
+     }
+ 
+-    if (engine.isScratching(deckNum)) {
++    // Pioneered: only the platter top scratches, and only while it is actually
++    // being held. Stock keyed this off engine.isScratching() alone, i.e. off
++    // [ChannelN],scratch2_enable, no matter which part of the wheel sent the
++    // message -- so a nudge on the side ring turned into a scratch whenever
++    // that flag happened to be set. It stays set for a while after the top is
++    // released: scratchDisable() ramps the rate back to playback speed before
++    // clearing it, and every scratchTick() restarts that ramp, so each nudge
++    // during the window held the deck in scratch mode for longer.
++    const platterHeld = PioneerDDJ400.jogTouched[channel];
++    const scratchAllowed = control === PioneerDDJ400.jogPlatterScratchCC && platterHeld;
++
++    if (scratchAllowed && engine.isScratching(deckNum)) {
+         engine.scratchTick(deckNum, newVal);
+-    } else { // fallback
+-        engine.setValue(group, "jog", newVal * this.bendScale);
++        return;
+     }
++
++    // Pitch bend. End a lingering (or stale) scratch first -- while
++    // scratch2_enable is set, scratch2 drives the deck's rate and the nudge
++    // would be swallowed. The hand is not on the platter top here, so this
++    // cannot cut a scratch short.
++    if (engine.isScratching(deckNum)) {
++        engine.scratchDisable(deckNum, false);
++    }
++
++    engine.setValue(group, "jog", newVal * this.bendScale);
+ };
+ 
+ 
+@@ -527,6 +567,12 @@
+ PioneerDDJ400.jogTouch = function(channel, _control, value) {
+     const deckNum = channel + 1;
+ 
++    // Pioneered: remember whether the platter top is held; jogTurn requires it
++    // before scratching. Recorded before the loop-adjust early return below,
++    // which fires on release as well as on press -- returning early there
++    // would strand this flag at true and re-arm the phantom scratch.
++    PioneerDDJ400.jogTouched[channel] = value !== 0;
++
+     // skip while adjusting the loop points
+     if (PioneerDDJ400.loopAdjustIn[channel] || PioneerDDJ400.loopAdjustOut[channel]) {
+         return;
+--- a/src/engine/controls/ratecontrol.h
++++ b/src/engine/controls/ratecontrol.h
+@@ -91,6 +91,10 @@
+ 
+ private:
+   void processTempRate(const int bufferSamples);
++  // Pioneered: size the jog (pitch bend) smoothing window from the actual
++  // buffer duration, so the nudge response does not depend on the audio
++  // latency setting.
++  void updateJogFilter(int iSamplesPerBuffer);
+   double getJogFactor() const;
+   double getWheelFactor() const;
+   SyncMode getSyncMode() const;
+@@ -143,6 +147,10 @@
+   ControlObject* m_pVCMode;
+   ControlObject* m_pScratch2Scratching;
+   Rotary* m_pJogFilter;
++  // Pioneered: buffer size the jog filter was last sized for, and the
++  // resulting sensitivity correction. See updateJogFilter().
++  int m_jogFilterSamplesPerBuffer;
++  double m_jogSensitivityScale;
+ 
+   ControlObject* m_pSampleRate;
+ 
+--- a/src/engine/controls/ratecontrol.cpp
++++ b/src/engine/controls/ratecontrol.cpp
+@@ -1,6 +1,7 @@
+ #include "engine/controls/ratecontrol.h"
+ 
+ #include <QtDebug>
++#include <cmath>
+ 
+ #include "control/controlobject.h"
+ #include "control/controlpotmeter.h"
+@@ -9,14 +10,40 @@
+ #include "control/controlttrotary.h"
+ #include "engine/controls/bpmcontrol.h"
+ #include "engine/controls/enginecontrol.h"
++#include "engine/engine.h"
+ #include "engine/positionscratchcontroller.h"
+ #include "moc_ratecontrol.cpp"
++#include "util/math.h"
+ #include "util/rotary.h"
+ #include "vinylcontrol/defs_vinylcontrol.h"
+ 
+ namespace {
+ constexpr int kRateSensitivityMin = 100;
+ constexpr int kRateSensitivityMax = 2500;
++
++// Pioneered: the jog (pitch bend) smoothing window used to be a fixed *number
++// of audio buffers* (25), so its length in real time was whatever the audio
++// buffer setting happened to be -- ~125 ms on a 5 ms desktop buffer, but well
++// over half a second on the Pi's much larger buffer. Since Rotary::filter() is
++// a plain moving average, the nudge also kept being applied for that entire
++// window after the hand stopped moving, which made beatmatching by ear a
++// guessing game: nudge, wait, overshoot, correct back.
++//
++// The window is now a fixed length of time instead, so the nudge follows the
++// hand and stops when the hand stops, whatever the audio buffer is set to.
++constexpr double kJogFilterWindowSeconds = 0.06;
++constexpr int kJogFilterMaxLength = 25;
++
++// Pioneered: the *displacement* a nudge produces is jog * sensitivity * buffer
++// duration, so it scaled with the audio buffer setting too -- a bigger buffer
++// shoved the track further per detent. Normalise it against a reference buffer
++// so the feel no longer depends on the latency setting, leaving bendScale in
++// the controller mapping as the single sensitivity knob. The reference is a
++// 1024-frame buffer at 44.1 kHz, the stock behaviour it is matched to.
++constexpr double kJogReferenceBufferSeconds = 1024.0 / 44100.0;
++// Bound the correction so an unusual buffer size cannot swing the feel wildly.
++constexpr double kJogSensitivityScaleMin = 0.5;
++constexpr double kJogSensitivityScaleMax = 2.0;
+ } // namespace
+ 
+ // Static default values for rate buttons (percents)
+@@ -166,8 +193,12 @@
+ 
+     m_pJog = new ControlObject(ConfigKey(group, "jog"));
+     m_pJogFilter = new Rotary();
+-    // FIXME: This should be dependent on sample rate/block size or something
+-    m_pJogFilter->setFilterLength(25);
++    // Pioneered: was a hard-coded 25 buffers, with an upstream FIXME asking
++    // for exactly this. updateJogFilter() sizes it from the real buffer
++    // duration on the first process callback; until then keep the old value.
++    m_pJogFilter->setFilterLength(kJogFilterMaxLength);
++    m_jogFilterSamplesPerBuffer = 0;
++    m_jogSensitivityScale = 1.0;
+ 
+ //     // Update Internal Settings
+ //     // Set Pitchbend Mode
+@@ -370,8 +401,43 @@
+     return m_pWheel->get();
+ }
+ 
++void RateControl::updateJogFilter(int iSamplesPerBuffer) {
++    // Pioneered: keep the jog smoothing window a fixed length of time and the
++    // nudge displacement independent of the audio buffer size. Only recompute
++    // when the buffer size actually changes -- this runs in the engine
++    // callback, and Rotary::setFilterLength() merely clamps an index bound
++    // (the buffer is allocated at its maximum in the constructor), so there is
++    // no allocation on this path.
++    if (iSamplesPerBuffer == m_jogFilterSamplesPerBuffer) {
++        return;
++    }
++    m_jogFilterSamplesPerBuffer = iSamplesPerBuffer;
++
++    const double sampleRate = m_pSampleRate ? m_pSampleRate->get() : 0.0;
++    const int framesPerBuffer = iSamplesPerBuffer / mixxx::kEngineChannelCount;
++    if (sampleRate <= 0.0 || framesPerBuffer <= 0) {
++        // Nothing sensible to derive from yet; keep the stock behaviour.
++        m_pJogFilter->setFilterLength(kJogFilterMaxLength);
++        m_jogSensitivityScale = 1.0;
++        return;
++    }
++
++    const double bufferSeconds = framesPerBuffer / sampleRate;
++    const int filterLength = math_clamp(
++            static_cast<int>(std::lround(kJogFilterWindowSeconds / bufferSeconds)),
++            1,
++            kJogFilterMaxLength);
++    m_pJogFilter->setFilterLength(filterLength);
++    m_jogSensitivityScale = math_clamp(kJogReferenceBufferSeconds / bufferSeconds,
++            kJogSensitivityScaleMin,
++            kJogSensitivityScaleMax);
++}
++
+ double RateControl::getJogFactor() const {
+-    // FIXME: Sensitivity should be configurable separately?
++    // Pioneered: scaled by m_jogSensitivityScale (see updateJogFilter) so a
++    // detent shifts the track by the same amount at any audio buffer size.
++    // The upstream FIXME here asked for the sensitivity to be configurable;
++    // the controller mapping's bendScale is that knob on this build.
+     constexpr double jogSensitivity = 0.1; // Nudges during playback
+     double jogValue = m_pJog->get();
+ 
+@@ -381,7 +447,7 @@
+     }
+ 
+     double jogValueFiltered = m_pJogFilter->filter(jogValue);
+-    double jogFactor = jogValueFiltered * jogSensitivity;
++    double jogFactor = jogValueFiltered * jogSensitivity * m_jogSensitivityScale;
+ 
+     if (util_isnan(jogValue) || util_isnan(jogFactor)) {
+         jogFactor = 0.0;
+@@ -402,6 +468,8 @@
+     *pReportReverse = false;
+ 
+     processTempRate(iSamplesPerBuffer);
++    // Pioneered: size the jog smoothing window from the real buffer duration.
++    updateJogFilter(iSamplesPerBuffer);
+ 
+     double rate;
+     const double searching = m_pRateSearch->get();
+--- a/src/util/rotary.cpp
++++ b/src/util/rotary.cpp
+@@ -86,6 +86,12 @@
+     } else {
+         m_iFilterLength = i;
+     }
++    // Pioneered: the write position must stay inside the (possibly shorter)
++    // averaging window, otherwise the next sample is written past its end and
++    // dropped from the average.
++    if (m_iFilterPos >= m_iFilterLength) {
++        m_iFilterPos = 0;
++    }
+ }
+ 
+ int Rotary::getFilterLength() {

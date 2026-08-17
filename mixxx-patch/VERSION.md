@@ -216,3 +216,41 @@
     `QPainterPath` / reused-member draw path. Touches
     `src/waveform/renderers/waveformrenderbeat.{h,cpp}` and
     `src/waveform/renderers/allshader/waveformrenderbeat.{h,cpp}`.
+16. `jog-nudge.patch` (added 2026-08-17, r25) — two jog wheel nudge fixes on
+    the DDJ-400.
+    * **The side ring never scratches.** The stock mapping routes all three jog
+      rotation messages — side `0x21`, platter `0x22` (vinyl on) and `0x23`
+      (vinyl off) — to one `jogTurn()` that scratches whenever
+      `[ChannelN],scratch2_enable` is set, with no regard for which part of the
+      wheel moved. That flag outlives the touch: `scratchDisable()` does not
+      clear it, it starts an alpha-beta ramp back to playback speed and only
+      clears the flag once the rate settles within `1e-5` of target — and
+      `scratchProcess()` starves that ramp while the wheel keeps moving
+      (`m_lastMovement`, refreshed by every `scratchTick()`). So a side nudge
+      in that window scratched the deck *and* held the window open, which is
+      why it self-healed after a few seconds of leaving the wheel alone.
+      `jogTurn()` now scratches only for CC `0x22` and only while the touch
+      sensor (note `0x36`) says the platter top is held, tracked in the new
+      `PioneerDDJ400.jogTouched` state — set *before* the loop-adjust early
+      return, which fires on release as well as press and would otherwise
+      strand the flag. A bend arriving while a stale scratch is still active
+      calls `scratchDisable(deck, false)` first, so the nudge is not swallowed
+      by `scratch2` driving the rate.
+    * **Nudge response no longer depends on the audio buffer size.** The jog
+      smoothing window was a `Rotary` moving average over a hard-coded 25
+      *audio buffers* — ~125 ms at a 5 ms desktop buffer, but well over half a
+      second at the Pi's buffer, and being a box filter it kept applying the
+      nudge for that whole window after the hand stopped, so every beatmatch
+      overcorrected. `RateControl::updateJogFilter()` now sizes the window from
+      the real buffer duration (`kJogFilterWindowSeconds` = 60 ms, clamped to
+      1..25 buffers) and normalises `jogSensitivity` against a reference
+      1024-frame @ 44.1 kHz buffer (correction clamped to 0.5..2.0), so a
+      detent shifts the track by the same amount at any latency. Both answer
+      upstream `FIXME`s in `ratecontrol.cpp`. Recomputed only when the buffer
+      size changes; `Rotary::setFilterLength()` allocates nothing (the vector
+      is sized to `kiRotaryFilterMaxLen` in the constructor), and it now also
+      clamps `m_iFilterPos` into the shortened window so no sample is written
+      past its end. The mapping's `bendScale` — the per-detent sensitivity
+      knob, and the one number to retune for feel — drops `0.8` → `0.4`.
+    Touches `res/controllers/Pioneer-DDJ-400-script.js`,
+    `src/engine/controls/ratecontrol.{h,cpp}`, `src/util/rotary.cpp`.

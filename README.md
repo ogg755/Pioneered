@@ -50,6 +50,11 @@ auto-mount layer (`pi/`), and prebuilt arm64 packages.
     connection drops — no trip to the preferences, no restart
   * On track load the deck tempo jumps to the physical position of the DDJ-400
     tempo fader (no more dead slider until you cross the old value)
+  * **Jog wheel nudge that beatmatches like Pioneer gear**: the side of the
+    wheel is always a pitch bend and can never scratch the track, and the
+    nudge follows your hand instead of lagging half a second behind it (the
+    smoothing window is a fixed slice of time now, not a fixed number of audio
+    buffers, so the feel no longer depends on the audio latency setting)
 * **Reliability**
   * Hardened rekordbox database parser: corrupt/truncated `EXPORT.PDB` files
     (e.g. from pulling a stick mid-write) can no longer crash Mixxx
