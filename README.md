@@ -35,6 +35,9 @@ auto-mount layer (`pi/`), and prebuilt arm64 packages.
   * Fixed column set — **#, Title, Artist, Key, Duration** — with proportional
     widths that always fill the screen
   * Track lists always open sorted by # ascending
+  * **LOAD returns you to the Overview tab** once the track is actually on the
+    deck — a load refused because the deck is still playing leaves you in the
+    browser with the "PAUSE DECK TO LOAD" banner and your place in the list
   * **Key traffic light**: the Key cell lights up green when the track is
     Camelot-compatible with the master deck (the deck that started playing
     most recently); keys are always shown as note names (Am, F♯m, …)
@@ -71,6 +74,9 @@ auto-mount layer (`pi/`), and prebuilt arm64 packages.
   * Opening the menu does **not** interrupt playback — a set keeps running
     underneath, though the panel blocks taps so you cannot hit a deck control
     by accident while it is open
+  * **Tap anywhere outside the panel to dismiss it** (clearing any armed
+    confirm), or use BACK. Taps on the panel's own empty space do nothing, so
+    missing a button never closes the menu under you
   * Power off uses `systemctl poweroff`, falling back to passwordless `sudo`
     (the same rule the USB eject relies on); if both are refused you get a
     POWER OFF FAILED banner rather than a dead button

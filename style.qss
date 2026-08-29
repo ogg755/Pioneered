@@ -642,6 +642,26 @@ WBeatSpinBox::up-button {
   background-color: rgba(0, 0, 0, 200);
 }
 
+/* The backdrop around the panel is four transparent buttons that dismiss the
+   menu (templates/settings_scrim.xml). They must stay invisible, so every
+   face the WPushButton base would give them is cleared here -- including
+   [value="1"], which they wear the whole time the panel is open (their value
+   IS show_settings), and which would otherwise paint the gradient fill and
+   border of a pressed-looking button across the entire screen.
+
+   Selected by their own ID rather than as "#SettingsScrim WPushButton": the
+   panel's buttons are descendants of the same scrim group, and a descendant
+   selector would tie with #SettingsPanel WPushButton on specificity and be
+   decided by source order. */
+#SettingsScrimArea,
+#SettingsScrimArea[value="1"],
+#SettingsScrimArea:hover,
+#SettingsScrimArea[value="1"]:hover,
+#SettingsScrimArea:pressed {
+  background-color: transparent;
+  border: none;
+}
+
 #SettingsPanel {
   background-color: #32323c;
   border: 2px solid #c3d541;
