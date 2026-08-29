@@ -40,6 +40,7 @@ jobs:
           patch -p1 < "$GITHUB_WORKSPACE/mixxx-patch/usb-browse-one-tap.patch"
           patch -p1 < "$GITHUB_WORKSPACE/mixxx-patch/beatgrid-ticks.patch"
           patch -p1 < "$GITHUB_WORKSPACE/mixxx-patch/jog-nudge.patch"
+          patch -p1 < "$GITHUB_WORKSPACE/mixxx-patch/load-returns-to-overview.patch"
           DEBEMAIL=pioneered-build@localhost DEBFULLNAME="Pioneered CI" \
             dch --local "+usbbrowse.r${GITHUB_RUN_NUMBER}." "Pioneered USB browse/eject patch build ${GITHUB_RUN_NUMBER}"
 

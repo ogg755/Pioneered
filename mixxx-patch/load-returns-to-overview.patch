@@ -1,0 +1,56 @@
+Description: Return the screen to the Overview tab after a successful load
+ On a CDJ/XDJ you browse, hit LOAD, and the unit puts the deck back in front
+ of you; the Pioneered skin left you sitting in the Browse (or Search) tab
+ after the track was on the deck, so every load needed a second tap on the
+ Overview tab to see the waveform you had just loaded.
+ .
+ WTrackTableView::loadSelectedTrackToGroup now sets the skin's Overview
+ WidgetStack trigger once the load has actually been emitted -- exactly the
+ control a tap on the Overview tab writes.
+ .
+ Placement is the whole point: it sits after every rejection path in the
+ function, so a load that did *not* happen leaves you where you were.
+ In particular a deck that is still playing the previous track takes the
+ early return added by usb-force-eject.patch (which raises
+ [Library],load_blocked and shows the "PAUSE DECK TO LOAD" banner) and never
+ reaches this line -- the browser stays up, with your place in the list and
+ the banner explaining why, instead of the view jumping away from a load
+ that was refused. The same holds for an empty selection and for a row the
+ model has no track for.
+ .
+ Preview decks are excluded: previewing a track is a browsing action, so it
+ must not throw you out of the browser.
+ .
+ [Tab],overview is a skin-defined control -- LegacySkinParser creates it for
+ the SingletonContainer trigger of the Overview page. Skins that do not
+ define it (stock Mixxx skins) simply have no such control, and
+ ControlObject::set() on a missing key is a no-op, so this is inert
+ everywhere but Pioneered. This mirrors the existing [Library],load_blocked
+ write a few lines above.
+Author: Pioneered CI <pioneered-build@localhost>
+Forwarded: no
+
+--- a/src/widget/wtracktableview.cpp
++++ b/src/widget/wtracktableview.cpp
+@@ -1404,6 +1404,21 @@ void WTrackTableView::loadSelectedTrackToGroup(const QString& group, bool play)
+     TrackPointer pTrack;
+     if (pTrackModel && (pTrack = pTrackModel->getTrack(index))) {
+         emit loadTrackToPlayer(pTrack, group, play);
++        // XDJ: the load happened, so put the deck back in front of the user
++        // the way a CDJ does. Every way this function can refuse a load --
++        // empty selection, a deck still playing the previous track (the
++        // load_blocked early return above), a row with no track -- returns
++        // before this point, so a refused load leaves the browser up with
++        // its banner and the user's place in the list.
++        //
++        // [Tab],overview is the Pioneered skin's WidgetStack trigger for the
++        // Overview page; writing 1 to it is precisely what tapping the
++        // Overview tab does, including clearing the Browse/Search triggers
++        // via their on_hide_select. Skins without that container never
++        // create the control and ControlObject::set() is then a no-op.
++        if (!PlayerManager::isPreviewDeckGroup(group)) {
++            ControlObject::set(ConfigKey("[Tab]", "overview"), 1.0);
++        }
+     }
+ }
+ 

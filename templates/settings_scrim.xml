@@ -1,0 +1,47 @@
+<Template>
+  <!--
+    Description:
+      One transparent tap target of the backdrop around the settings panel.
+      Tapping it dismisses the panel, so BACK is a convenience rather than the
+      only way out.
+    Variables:
+      Size: the area's size, as for any widget.
+
+    The press is exactly the one SettingsBack makes: show_settings is 1 while
+    the panel is open, so this toggle takes it to 0, and menu_disarm clears any
+    armed confirm - a half-armed POWER OFF must never survive being tapped
+    away, or reopening the menu would sit one tap from a shutdown.
+
+    Four of these fence the panel in (above, below, left, right) rather than one
+    full-screen button behind it. Fencing is what keeps the panel's own dead
+    space inert: a tap on the panel background hits the panel group, which
+    passes the event to its parent rather than to a sibling underneath, so
+    missing a button by a few pixels never closes the menu.
+
+    Unpatched Mixxx has no [Library],menu_disarm; the connection is ignored
+    there and the dismissal still works, same as the rest of settings.xml.
+  -->
+  <PushButton>
+    <ObjectName>SettingsScrimArea</ObjectName>
+    <Size><Variable name="Size"/></Size>
+    <NumberStates>2</NumberStates>
+    <State>
+      <Number>0</Number>
+      <Text></Text>
+    </State>
+    <State>
+      <Number>1</Number>
+      <Text></Text>
+    </State>
+    <Connection>
+      <ConfigKey persist="false">[Skin],show_settings</ConfigKey>
+      <ButtonState>LeftButton</ButtonState>
+    </Connection>
+    <Connection>
+      <ConfigKey persist="false">[Library],menu_disarm</ConfigKey>
+      <ConnectValueToWidget>false</ConnectValueToWidget>
+      <EmitOnPressAndRelease>true</EmitOnPressAndRelease>
+      <ButtonState>LeftButton</ButtonState>
+    </Connection>
+  </PushButton>
+</Template>

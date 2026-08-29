@@ -254,3 +254,36 @@
       knob, and the one number to retune for feel — drops `0.8` → `0.4`.
     Touches `res/controllers/Pioneer-DDJ-400-script.js`,
     `src/engine/controls/ratecontrol.{h,cpp}`, `src/util/rotary.cpp`.
+17. `load-returns-to-overview.patch` (added 2026-08-29, r26) — after a load
+    that actually happened, the screen returns to the Overview tab, the way a
+    CDJ puts the deck back in front of you once the track is on it. Until now
+    every LOAD left you in Browse (or Search) and needed a second tap on the
+    Overview tab. `WTrackTableView::loadSelectedTrackToGroup` writes 1 to
+    `[Tab],overview` — the skin's WidgetStack trigger for the Overview page,
+    the very control the Overview tab button writes, so the Browse/Search
+    triggers are cleared by their existing `on_hide_select`. The write sits
+    *after* every rejection path in that function, which is the whole point:
+    a deck still playing the previous track takes the early return added by
+    `usb-force-eject.patch` (raise `[Library],load_blocked`, show "PAUSE DECK
+    TO LOAD") and never reaches it, so a refused load leaves the browser up
+    with the banner and your place in the list rather than jumping the view
+    away from something that did not happen. Same for an empty selection and
+    for a row the model has no track for. Preview decks are excluded
+    (`PlayerManager::isPreviewDeckGroup`) — previewing is a browsing action
+    and must not throw you out of the browser. `[Tab],overview` is created by
+    `LegacySkinParser` from the Overview `SingletonContainer`'s `trigger`
+    attribute; skins that do not define it never create the control and
+    `ControlObject::set()` on a missing key is a no-op, so this is inert
+    outside Pioneered. Mirrors the existing `[Library],load_blocked` write a
+    few lines above. Touches `src/widget/wtracktableview.cpp`.
+    Skin side (same release, no patch needed): tapping the backdrop outside
+    the settings panel now dismisses it. New `templates/settings_scrim.xml`
+    (a transparent `#SettingsScrimArea` button pressing the same
+    `[Skin],show_settings` toggle + `[Library],menu_disarm` pair as BACK),
+    `settings.xml` (four of them fencing the panel — they also take over the
+    centering `SettingsOverlay` did on its own), `style.qss` (clears every
+    `WPushButton` face on `#SettingsScrimArea`, `[value="1"]` included: the
+    scrims carry `show_settings` as their value, so they wear state 1 the
+    entire time the panel is open). Fencing rather than one full-screen
+    button behind the panel keeps the panel's own dead space inert — a tap
+    that misses a button by a few pixels must not close the menu.
