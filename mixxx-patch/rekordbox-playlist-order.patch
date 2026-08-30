@@ -1,0 +1,52 @@
+Description: Fix rekordbox playlist track order on import.
+
+ When Mixxx imports a rekordbox USB it stores each playlist entry keyed by
+ the rekordbox `entry_index` in a QMap (sorted by that key), then reads the
+ tracks back out by looking up the synthetic indices 1..size via
+ QMap::operator[]. That is only correct when `entry_index` is exactly the
+ contiguous set {1..N}. Real rekordbox exports routinely write sparse and/or
+ non-1-based entry_index values, so the synthetic lookup:
+   - pulled tracks into the wrong positions (commonly the trailing tracks of
+     the device surfaced at the top of the playlist), and
+   - silently inserted phantom track_id=0 rows for every index that had no
+     matching key (QMap::operator[] default-inserts on a missing key).
+
+ This became visible once rekordbox-import-fixes.patch corrected the PDB
+ row-count parsing so playlists actually populate; before that the playlists
+ came in empty and the ordering weakness was hidden.
+
+ Fix: iterate the inner QMap in its natural (entry_index-ascending) key order
+ and hand out a fresh 1-based position, instead of looking entries up by a
+ synthetic index. Correct for 0-based, 1-based, sparse or permuted
+ entry_index, and it never materialises phantom rows.
+
+diff --git a/src/library/rekordbox/rekordboxfeature.cpp b/src/library/rekordbox/rekordboxfeature.cpp
+--- a/src/library/rekordbox/rekordboxfeature.cpp
++++ b/src/library/rekordbox/rekordboxfeature.cpp
+@@ -726,8 +726,21 @@
+         if (playlistTrackMap.contains(childID)) {
+-            // Add playlist tracks for children
+-            for (uint32_t trackIndex = 1; trackIndex <=
+-                    static_cast<uint32_t>(playlistTrackMap[childID].size());
+-                    trackIndex++) {
+-                uint32_t rbTrackID = playlistTrackMap[childID][trackIndex];
++            // Add playlist tracks for children.
++            // XDJ: walk the entries in rekordbox entry_index order (the inner
++            // QMap is already sorted by that key) and hand out a fresh 1-based
++            // position. Upstream looked entries up by a synthetic index
++            // 1..size via QMap::operator[], which is only correct when
++            // entry_index is exactly the contiguous set {1..N}. Real rekordbox
++            // exports use sparse / non-1-based entry_index values, so that
++            // lookup scrambled the order (trailing tracks surfacing at the top
++            // of the playlist) and silently inserted phantom track_id=0 rows
++            // for every missing key.
++            int trackIndex = 0;
++            const QMap<uint32_t, uint32_t>& playlistEntries =
++                    playlistTrackMap[childID];
++            for (auto it = playlistEntries.constBegin();
++                    it != playlistEntries.constEnd();
++                    ++it) {
++                trackIndex++;
++                uint32_t rbTrackID = it.value();
+
+                 int trackID = -1;

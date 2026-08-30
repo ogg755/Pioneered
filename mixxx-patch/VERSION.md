@@ -287,3 +287,21 @@
     entire time the panel is open). Fencing rather than one full-screen
     button behind the panel keeps the panel's own dead space inert — a tap
     that misses a button by a few pixels must not close the menu.
+18. `rekordbox-playlist-order.patch` (added 2026-08-30, r27) — rekordbox
+    playlists imported off a USB now keep their track order. `buildPlaylistTree`
+    stored each entry keyed by rekordbox `entry_index` in a `QMap` (sorted by
+    that key) but then read the entries back by looking up the synthetic indices
+    `1..size` via `QMap::operator[]`, which is only correct when `entry_index` is
+    exactly the contiguous set `{1..N}`. Real rekordbox exports write sparse and
+    non-1-based `entry_index` values, so the lookup pulled tracks into the wrong
+    slots — most visibly the trailing tracks of the device surfaced at the top
+    of the playlist — and, because `QMap::operator[]` default-inserts on a
+    missing key, injected phantom `track_id=0` rows for every index with no
+    match. The loop now walks the inner `QMap` in its natural
+    (`entry_index`-ascending) key order via `constBegin()`/`constEnd()` and hands
+    out a fresh 1-based position, so it is correct for 0-based, 1-based, sparse
+    or permuted `entry_index` and never materialises phantom rows. Only became
+    visible once `rekordbox-import-fixes.patch` (8) fixed the PDB row count so
+    playlists actually populate; before that they imported empty and the
+    ordering weakness was hidden. Touches
+    `src/library/rekordbox/rekordboxfeature.cpp`.
